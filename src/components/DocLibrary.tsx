@@ -1,0 +1,450 @@
+"use client";
+
+import { useDeferredValue, useEffect, useMemo, useState } from "react";
+import DocCard from "@/components/DocCard";
+import type { DocSource, DocStatus, DocType, MechDocument } from "@/types";
+
+interface DocLibraryProps {
+  documents: MechDocument[];
+  onRemove: (id: string) => void;
+  onSelect: (doc: MechDocument, searchQuery: string) => void;
+  onRetry: (doc: MechDocument) => void;
+  onExport?: (doc: MechDocument) => void;
+  onBulkExport?: (docs: MechDocument[]) => void;
+  onBulkDelete?: (ids: string[]) => void;
+  onBulkRetry?: (docs: MechDocument[]) => void;
+}
+
+type SortOption = "newest" | "oldest" | "title" | "type";
+type DateFilter = "all" | "7" | "30" | "365";
+type SearchMode = "keyword" | "semantic";
+
+const PAGE_SIZE = 48;
+
+function cosineSimilarity(a: number[] | undefined, b: number[] | null): number {
+  if (!a || !b || a.length !== b.length) return -1;
+  let dot = 0;
+  let aMag = 0;
+  let bMag = 0;
+  for (let i = 0; i < a.length; i++) {
+    dot += a[i] * b[i];
+    aMag += a[i] * a[i];
+    bMag += b[i] * b[i];
+  }
+  if (!aMag || !bMag) return -1;
+  return dot / (Math.sqrt(aMag) * Math.sqrt(bMag));
+}
+
+export default function DocLibrary({
+  documents,
+  onRemove,
+  onSelect,
+  onRetry,
+  onExport,
+  onBulkExport,
+  onBulkDelete,
+  onBulkRetry,
+}: DocLibraryProps) {
+  const [search, setSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState<DocStatus | "all">("all");
+  const [typeFilter, setTypeFilter] = useState<DocType | "all">("all");
+  const [sourceFilter, setSourceFilter] = useState<DocSource | "all">("all");
+  const [categoryFilter, setCategoryFilter] = useState("all");
+  const [tagFilter, setTagFilter] = useState("all");
+  const [dateFilter, setDateFilter] = useState<DateFilter>("all");
+  const [sortBy, setSortBy] = useState<SortOption>("newest");
+  const [searchMode, setSearchMode] = useState<SearchMode>("keyword");
+  const [queryEmbedding, setQueryEmbedding] = useState<number[] | null>(null);
+  const [semanticError, setSemanticError] = useState<string | null>(null);
+  const [page, setPage] = useState(1);
+  const [selectionMode, setSelectionMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const deferredSearch = useDeferredValue(search);
+
+  useEffect(() => {
+    const q = deferredSearch.trim();
+    if (searchMode !== "semantic" || !q) {
+      setQueryEmbedding(null);
+      setSemanticError(null);
+      return;
+    }
+
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => {
+      void fetch("/api/embed", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: q }),
+        signal: controller.signal,
+      })
+        .then(async (res) => {
+          const data = (await res.json()) as { embedding?: number[]; error?: string };
+          if (!res.ok) throw new Error(data.error ?? "Semantic search failed");
+          setQueryEmbedding(data.embedding ?? null);
+          setSemanticError(null);
+        })
+        .catch((err) => {
+          if (err instanceof DOMException && err.name === "AbortError") return;
+          setQueryEmbedding(null);
+          setSemanticError(err instanceof Error ? err.message : "Semantic search failed");
+        });
+    }, 350);
+
+    return () => {
+      window.clearTimeout(timeout);
+      controller.abort();
+    };
+  }, [deferredSearch, searchMode]);
+
+  const categories = useMemo(
+    () =>
+      Array.from(new Set(documents.map((doc) => doc.category).filter(Boolean) as string[])).sort(),
+    [documents]
+  );
+  const tags = useMemo(
+    () => Array.from(new Set(documents.flatMap((doc) => doc.tags ?? []))).sort(),
+    [documents]
+  );
+
+  const filtered = useMemo(() => {
+    const q = deferredSearch.toLowerCase().trim();
+    const now = Date.now();
+    const maxAgeMs =
+      dateFilter === "all" ? null : Number(dateFilter) * 24 * 60 * 60 * 1000;
+
+    return documents
+      .filter((d) => {
+        if (statusFilter !== "all" && d.status !== statusFilter) return false;
+        if (typeFilter !== "all" && d.type !== typeFilter) return false;
+        if (sourceFilter !== "all" && d.source !== sourceFilter) return false;
+        if (categoryFilter !== "all" && d.category !== categoryFilter) return false;
+        if (tagFilter !== "all" && !(d.tags ?? []).includes(tagFilter)) return false;
+        if (maxAgeMs && now - new Date(d.addedAt).getTime() > maxAgeMs) return false;
+        if (!q) return true;
+        if (searchMode === "semantic") return Boolean(d.embedding && queryEmbedding);
+        const searchableText = [
+          d.title,
+          d.summary,
+          d.category,
+          d.url,
+          d.content,
+          ...(d.tags ?? []),
+        ]
+          .filter(Boolean)
+          .join("\n")
+          .toLowerCase();
+
+        return searchableText.includes(q);
+      })
+      .sort((a, b) => {
+        if (searchMode === "semantic" && queryEmbedding) {
+          return cosineSimilarity(b.embedding, queryEmbedding) - cosineSimilarity(a.embedding, queryEmbedding);
+        }
+        if (sortBy === "oldest") {
+          return new Date(a.addedAt).getTime() - new Date(b.addedAt).getTime();
+        }
+        if (sortBy === "title") return a.title.localeCompare(b.title);
+        if (sortBy === "type") return a.type.localeCompare(b.type);
+        return new Date(b.addedAt).getTime() - new Date(a.addedAt).getTime();
+      });
+  }, [
+    documents,
+    deferredSearch,
+    statusFilter,
+    typeFilter,
+    sourceFilter,
+    categoryFilter,
+    tagFilter,
+    dateFilter,
+    searchMode,
+    queryEmbedding,
+    sortBy,
+  ]);
+
+  const pageCount = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  const visibleDocs = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+  const firstVisible = filtered.length === 0 ? 0 : (page - 1) * PAGE_SIZE + 1;
+  const lastVisible = Math.min(page * PAGE_SIZE, filtered.length);
+  const selectedDocs = documents.filter((doc) => selectedIds.has(doc.id));
+
+  useEffect(() => {
+    setPage(1);
+  }, [search, statusFilter, typeFilter, sourceFilter, categoryFilter, tagFilter, dateFilter, sortBy]);
+
+  useEffect(() => {
+    setPage((current) => Math.min(current, pageCount));
+  }, [pageCount]);
+
+  useEffect(() => {
+    setSelectedIds((current) => {
+      const validIds = new Set(documents.map((doc) => doc.id));
+      const next = new Set(Array.from(current).filter((id) => validIds.has(id)));
+      return next.size === current.size ? current : next;
+    });
+  }, [documents]);
+
+  function toggleSelected(id: string) {
+    setSelectedIds((current) => {
+      const next = new Set(current);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  function clearSelection() {
+    setSelectedIds(new Set());
+    setSelectionMode(false);
+  }
+
+  function selectVisible() {
+    setSelectedIds((current) => {
+      const next = new Set(current);
+      for (const doc of visibleDocs) next.add(doc.id);
+      return next;
+    });
+    setSelectionMode(true);
+  }
+
+  if (documents.length === 0) {
+    return (
+      <div className="mt-8 rounded-lg border border-dashed border-slate-300 bg-white px-6 py-10 text-center">
+        <p className="text-sm font-medium text-slate-700">No documents yet</p>
+        <p className="mt-1 text-sm text-slate-500">
+          Use Web Sweep to find documents or Upload to add local files.
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <section className="mt-8">
+      <div className="mb-3 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+        <div>
+          <h2 className="text-sm font-semibold text-slate-900">
+            Library ({documents.length})
+          </h2>
+          <p className="mt-0.5 text-xs text-slate-500">
+            Showing {firstVisible}-{lastVisible} of {filtered.length} matched documents.
+            Search scans full document text.
+          </p>
+        </div>
+        <div className="flex gap-2">
+          <button
+            type="button"
+            onClick={() => {
+              setSelectionMode((current) => !current);
+              if (selectionMode) setSelectedIds(new Set());
+            }}
+            className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+          >
+            {selectionMode ? "Cancel selection" : "Select"}
+          </button>
+          <button
+            type="button"
+            onClick={selectVisible}
+            className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+          >
+            Select page
+          </button>
+        </div>
+      </div>
+
+      {selectionMode && (
+        <div className="mb-4 flex flex-col gap-3 rounded-xl border border-mech-200 bg-mech-50 px-4 py-3 text-sm sm:flex-row sm:items-center sm:justify-between">
+          <p className="font-medium text-mech-800">
+            {selectedDocs.length} selected
+          </p>
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => onBulkExport?.(selectedDocs)}
+              disabled={selectedDocs.length === 0 || !onBulkExport}
+              className="rounded-lg bg-white px-3 py-1.5 font-medium text-slate-700 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              Export
+            </button>
+            <button
+              type="button"
+              onClick={() => onBulkRetry?.(selectedDocs)}
+              disabled={selectedDocs.length === 0 || !onBulkRetry}
+              className="rounded-lg bg-white px-3 py-1.5 font-medium text-slate-700 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              Re-analyze
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                onBulkDelete?.(Array.from(selectedIds));
+                clearSelection();
+              }}
+              disabled={selectedDocs.length === 0 || !onBulkDelete}
+              className="rounded-lg bg-white px-3 py-1.5 font-medium text-red-600 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              Delete
+            </button>
+            <button
+              type="button"
+              onClick={clearSelection}
+              className="rounded-lg px-3 py-1.5 font-medium text-mech-700 hover:bg-white/60"
+            >
+              Clear
+            </button>
+          </div>
+        </div>
+      )}
+
+      <div className="mb-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-[1fr_auto_auto_auto_auto]">
+        <input
+          type="search"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Search title, content, summary, tags…"
+          className="input-base"
+        />
+        <select
+          value={searchMode}
+          onChange={(e) => setSearchMode(e.target.value as SearchMode)}
+          className="select-base"
+        >
+          <option value="keyword">Keyword</option>
+          <option value="semantic">Semantic</option>
+        </select>
+        <select
+          value={statusFilter}
+          onChange={(e) => setStatusFilter(e.target.value as DocStatus | "all")}
+          className="select-base"
+        >
+          <option value="all">All status</option>
+          <option value="pending">Pending</option>
+          <option value="ready">Ready</option>
+          <option value="processing">Processing</option>
+          <option value="error">Error</option>
+        </select>
+        <select
+          value={typeFilter}
+          onChange={(e) => setTypeFilter(e.target.value as DocType | "all")}
+          className="select-base"
+        >
+          <option value="all">All types</option>
+          <option value="pdf">PDF</option>
+          <option value="txt">TXT</option>
+          <option value="csv">CSV</option>
+        </select>
+        <select
+          value={sortBy}
+          onChange={(e) => setSortBy(e.target.value as SortOption)}
+          className="select-base"
+        >
+          <option value="newest">Newest</option>
+          <option value="oldest">Oldest</option>
+          <option value="title">Title</option>
+          <option value="type">Type</option>
+        </select>
+      </div>
+
+      {semanticError && (
+        <p className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-700">
+          Semantic search unavailable: {semanticError}
+        </p>
+      )}
+
+      <div className="mb-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+        <select
+          value={categoryFilter}
+          onChange={(e) => setCategoryFilter(e.target.value)}
+          className="select-base"
+        >
+          <option value="all">All categories</option>
+          {categories.map((category) => (
+            <option key={category} value={category}>
+              {category}
+            </option>
+          ))}
+        </select>
+        <select
+          value={sourceFilter}
+          onChange={(e) => setSourceFilter(e.target.value as DocSource | "all")}
+          className="select-base"
+        >
+          <option value="all">All sources</option>
+          <option value="upload">Upload</option>
+          <option value="sweep">Sweep</option>
+        </select>
+        <select
+          value={dateFilter}
+          onChange={(e) => setDateFilter(e.target.value as DateFilter)}
+          className="select-base"
+        >
+          <option value="all">Any date</option>
+          <option value="7">Last 7 days</option>
+          <option value="30">Last 30 days</option>
+          <option value="365">Last year</option>
+        </select>
+        <select
+          value={tagFilter}
+          onChange={(e) => setTagFilter(e.target.value)}
+          className="select-base"
+        >
+          <option value="all">All tags</option>
+          {tags.map((tag) => (
+            <option key={tag} value={tag}>
+              {tag}
+            </option>
+          ))}
+        </select>
+      </div>
+
+      {filtered.length === 0 ? (
+        <p className="rounded-lg bg-slate-100 py-8 text-center text-sm text-slate-500">
+          No documents match your search.
+        </p>
+      ) : (
+        <>
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+            {visibleDocs.map((doc) => (
+              <DocCard
+                key={doc.id}
+                doc={doc}
+                onRemove={onRemove}
+                onSelect={() => onSelect(doc, deferredSearch)}
+                onRetry={() => onRetry(doc)}
+                onExport={onExport ? () => onExport(doc) : undefined}
+                searchQuery={deferredSearch}
+                selectionMode={selectionMode}
+                selected={selectedIds.has(doc.id)}
+                onToggleSelected={() => toggleSelected(doc.id)}
+              />
+            ))}
+          </div>
+
+          {pageCount > 1 && (
+            <div className="mt-5 flex flex-col items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm sm:flex-row">
+              <p className="text-slate-500">
+                Page {page} of {pageCount}
+              </p>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => setPage((current) => Math.max(1, current - 1))}
+                  disabled={page === 1}
+                  className="rounded-lg border border-slate-200 px-3 py-1.5 font-medium text-slate-700 disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  Previous
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPage((current) => Math.min(pageCount, current + 1))}
+                  disabled={page === pageCount}
+                  className="rounded-lg border border-slate-200 px-3 py-1.5 font-medium text-slate-700 disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  Next
+                </button>
+              </div>
+            </div>
+          )}
+        </>
+      )}
+    </section>
+  );
+}
