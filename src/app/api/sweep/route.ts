@@ -8,11 +8,11 @@ import {
 import type { DocType, SweepResult } from "@/types";
 
 const VALIDATE_TIMEOUT_MS = 12000;
-const MAX_RESULTS = 12;
+const MAX_RESULTS = 24;
 const MAX_FETCH_BYTES = 15 * 1024 * 1024;
 const DEFAULT_SEARCH_MODEL = "perplexity/sonar-pro";
 
-const SWEEP_SYSTEM_PROMPT = `You are a mechanical engineering research agent. Find 8-12 real, publicly accessible mechanical engineering documents (PDFs, technical reports, datasheets, textbooks, standards summaries, or CSV datasets) relevant to the user's query.
+const SWEEP_SYSTEM_PROMPT = `You are a mechanical engineering research agent. Find 20-30 real, publicly accessible mechanical engineering documents (PDFs, technical reports, datasheets, textbooks, standards summaries, or CSV datasets) relevant to the user's query.
 
 Return ONLY a valid JSON array — no markdown, no preamble, no explanation. Each element must have:
 - "title": string
@@ -93,16 +93,21 @@ async function validateSweepResult(result: SweepResult): Promise<SweepResult | n
 
 export async function POST(request: NextRequest) {
   try {
-    const body = (await request.json()) as { query?: string };
+    const body = (await request.json()) as { query?: string; excludeUrls?: string[] };
     const query = body.query?.trim() || "Find mechanical engineering documents";
+    const excluded = (body.excludeUrls ?? []).slice(0, 80);
+    const userPrompt =
+      excluded.length > 0
+        ? `${query}\n\nAvoid these URLs because they are already in the user's current sweep/library:\n${excluded.join("\n")}`
+        : query;
 
     const rawText = await callOpenRouter({
       model: process.env.OPENROUTER_SEARCH_MODEL ?? DEFAULT_SEARCH_MODEL,
       messages: [
         { role: "system", content: SWEEP_SYSTEM_PROMPT },
-        { role: "user", content: query },
+        { role: "user", content: userPrompt },
       ],
-      maxTokens: 2000,
+      maxTokens: 4000,
       temperature: 0.2,
     });
 
@@ -120,6 +125,7 @@ export async function POST(request: NextRequest) {
       .map((r) => {
         const url = normalizeUrl(r.url);
         if (!url) return null;
+        if (excluded.includes(url)) return null;
         return {
           ...r,
           url,

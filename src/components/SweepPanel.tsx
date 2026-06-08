@@ -23,7 +23,7 @@ export default function SweepPanel({ onAdd, addedUrls }: SweepPanelProps) {
   const [error, setError] = useState<string | null>(null);
   const [hasSearched, setHasSearched] = useState(false);
 
-  async function handleSweep(searchQuery?: string) {
+  async function handleSweep(searchQuery?: string, append = false) {
     const q = (searchQuery ?? query).trim();
     if (searchQuery) setQuery(searchQuery);
 
@@ -35,14 +35,30 @@ export default function SweepPanel({ onAdd, addedUrls }: SweepPanelProps) {
       const res = await fetch("/api/sweep", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ query: q || undefined }),
+        body: JSON.stringify({
+          query: q || undefined,
+          excludeUrls: append
+            ? [...Array.from(addedUrls), ...results.map((result) => result.url)]
+            : Array.from(addedUrls),
+        }),
       });
       const data = (await res.json()) as { results?: SweepResult[]; error?: string };
       if (!res.ok) throw new Error(data.error ?? "Sweep failed");
-      setResults(data.results ?? []);
+      const nextResults = data.results ?? [];
+      setResults((prev) => {
+        const merged = append ? [...prev] : [];
+        const seen = new Set(merged.map((result) => result.url));
+        for (const result of nextResults) {
+          if (!seen.has(result.url)) {
+            merged.push(result);
+            seen.add(result.url);
+          }
+        }
+        return merged;
+      });
     } catch (err) {
       setError(err instanceof Error ? err.message : "Sweep failed");
-      setResults([]);
+      if (!append) setResults([]);
     } finally {
       setLoading(false);
     }
@@ -51,7 +67,7 @@ export default function SweepPanel({ onAdd, addedUrls }: SweepPanelProps) {
   return (
     <div className="space-y-4">
       <p className="text-sm text-slate-600">
-        Search the web for publicly accessible mechanical engineering documents.
+        Search the web for publicly accessible mechanical engineering documents. Sweep again to append more unique resources.
       </p>
 
       <div className="flex flex-col gap-2 sm:flex-row">
@@ -106,16 +122,26 @@ export default function SweepPanel({ onAdd, addedUrls }: SweepPanelProps) {
         <div className="space-y-2">
           <div className="flex items-center justify-between">
             <p className="text-xs font-medium text-slate-500">{results.length} results</p>
-            <button
-              type="button"
-              onClick={() =>
-                results.filter((r) => !addedUrls.has(r.url)).forEach((r) => onAdd(r))
-              }
-              disabled={results.every((r) => addedUrls.has(r.url))}
-              className="text-xs font-medium text-mech-600 hover:underline disabled:text-slate-400"
-            >
-              Add all
-            </button>
+            <div className="flex items-center gap-3">
+              <button
+                type="button"
+                onClick={() => handleSweep(undefined, true)}
+                disabled={loading}
+                className="text-xs font-medium text-mech-600 hover:underline disabled:text-slate-400"
+              >
+                Sweep more
+              </button>
+              <button
+                type="button"
+                onClick={() =>
+                  results.filter((r) => !addedUrls.has(r.url)).forEach((r) => onAdd(r))
+                }
+                disabled={results.every((r) => addedUrls.has(r.url))}
+                className="text-xs font-medium text-mech-600 hover:underline disabled:text-slate-400"
+              >
+                Add all
+              </button>
+            </div>
           </div>
 
           {results.map((result) => {

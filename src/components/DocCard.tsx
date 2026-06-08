@@ -64,6 +64,11 @@ export default function DocCard({
 }: DocCardProps) {
   const isProcessing = doc.status === "processing";
   const canExport = doc.status === "ready" && Boolean(onExport);
+  const previewText =
+    doc.content.trim() ||
+    doc.summary ||
+    doc.error ||
+    (isProcessing ? "Document is still being prepared." : "No readable preview available.");
   const handleOpen = () => {
     if (selectionMode) onToggleSelected?.();
     else onSelect();
@@ -75,7 +80,7 @@ export default function DocCard({
       tabIndex={0}
       onClick={handleOpen}
       onKeyDown={(e) => e.key === "Enter" && handleOpen()}
-      className={`group flex min-h-[15rem] cursor-pointer flex-col rounded-xl border bg-white p-4 shadow-sm transition hover:-translate-y-0.5 hover:border-mech-300 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-mech-500/30 ${
+      className={`group relative flex min-h-[15rem] cursor-pointer flex-col rounded-xl border bg-white p-4 shadow-sm transition hover:-translate-y-0.5 hover:border-mech-300 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-mech-500/30 ${
         selected ? "border-mech-400 ring-2 ring-mech-500/20" : "border-slate-200"
       }`}
     >
@@ -210,6 +215,40 @@ export default function DocCard({
             <span className="font-medium text-mech-600 opacity-0 transition group-hover:opacity-100">
               Open
             </span>
+          </div>
+        )}
+      </div>
+
+      <div className="pointer-events-none absolute left-3 right-3 top-12 z-20 hidden rounded-xl border border-slate-200 bg-white p-3 text-left shadow-xl group-hover:block">
+        <div className="mb-2 flex items-center justify-between gap-2">
+          <p className="truncate text-xs font-semibold uppercase tracking-wide text-slate-400">
+            File preview
+          </p>
+          <p className="shrink-0 text-[11px] text-slate-400">
+            {doc.pageCount ? `${doc.pageCount} pages` : `${doc.content.length.toLocaleString()} chars`}
+          </p>
+        </div>
+        <p className="max-h-40 overflow-hidden whitespace-pre-wrap text-xs leading-relaxed text-slate-700">
+          <HighlightText text={previewText.slice(0, 900)} query={searchQuery} />
+          {previewText.length > 900 && " …"}
+        </p>
+        {(doc.detectedUnits?.length || doc.tables?.length || doc.detectedLanguage) && (
+          <div className="mt-2 flex flex-wrap gap-1 text-[11px] text-slate-500">
+            {doc.detectedLanguage && (
+              <span className="rounded-full bg-slate-100 px-2 py-0.5">
+                {doc.detectedLanguage}
+              </span>
+            )}
+            {doc.tables && doc.tables.length > 0 && (
+              <span className="rounded-full bg-slate-100 px-2 py-0.5">
+                {doc.tables.length} table{doc.tables.length !== 1 ? "s" : ""}
+              </span>
+            )}
+            {doc.detectedUnits?.slice(0, 4).map((unit) => (
+              <span key={unit} className="rounded-full bg-slate-100 px-2 py-0.5">
+                {unit}
+              </span>
+            ))}
           </div>
         )}
       </div>
