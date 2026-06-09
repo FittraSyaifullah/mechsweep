@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { callChatAI } from "@/lib/ai";
 import { exaSearchEnabled, searchExa } from "@/lib/exa";
 import { fetchRemoteUrl } from "@/lib/fetch-document";
+import { resolveSweepMaxResults } from "@/lib/sweep-limits";
 import {
   detectDocTypeFromContentType,
   detectDocTypeFromUrl,
@@ -12,14 +13,14 @@ import { SWEEP_TYPE_HINT } from "@/lib/file-types";
 import type { DocType, SweepResult } from "@/types";
 
 const VALIDATE_TIMEOUT_MS = 12000;
-const MAX_RESULTS = 32;
-const MAX_AI_CANDIDATES = 28;
+const VALIDATE_CONCURRENCY = 20;
 export const maxDuration = 60;
 const MAX_FETCH_BYTES = 15 * 1024 * 1024;
 const DEFAULT_MISTRAL_SEARCH_MODEL = "mistral-small-latest";
 const DEFAULT_OPENROUTER_SEARCH_MODEL = "perplexity/sonar-pro";
 
-const SWEEP_SYSTEM_PROMPT = `You are a mechanical engineering research agent. Find 20-24 real, publicly accessible mechanical engineering documents relevant to the user's query.
+function buildSweepSystemPrompt(resultTarget: number): string {
+  return `You are a mechanical engineering research agent. Find ${Math.min(resultTarget, 60)} real, publicly accessible mechanical engineering documents relevant to the user's query.
 
 Return ONLY valid JSON with this shape:
 {"results":[{"title":"...","url":"https://...","type":"${SWEEP_TYPE_HINT}","description":"1 sentence","relevanceScore":0.0,"category":"..."}]}
@@ -27,6 +28,7 @@ Return ONLY valid JSON with this shape:
 Each result needs title, real https url, type (${SWEEP_TYPE_HINT}), description, relevanceScore (0-1), and category from: Thermodynamics, Fluid Mechanics, Solid Mechanics, Materials Science, Manufacturing, Dynamics & Vibrations, Heat Transfer, Machine Design, FEA / FEM, Control Systems, Robotics, HVAC, Other.
 
 Prefer PDFs, datasheets, CAD (STL/STEP/DWG), standards, JSON/CSV datasets, markdown notes, and open textbooks. Include zip archives when they contain engineering documents.`;
+}
 
 function normalizeUrl(input: string): string | null {
   try {
@@ -86,25 +88,45 @@ async function validateSweepResult(result: SweepResult): Promise<SweepResult | n
   }
 }
 
-async function finalizeSweepResults(
+async function validateSweepResults(
   candidates: SweepResult[],
-  options: { skipValidation?: boolean } = {}
+  maxResults: number
 ): Promise<SweepResult[]> {
-  if (options.skipValidation) {
-    return candidates
-      .slice()
-      .sort((a, b) => b.relevanceScore - a.relevanceScore)
-      .slice(0, MAX_RESULTS);
+  const validated: SweepResult[] = [];
+
+  for (let i = 0; i < candidates.length; i += VALIDATE_CONCURRENCY) {
+    const batch = candidates.slice(i, i + VALIDATE_CONCURRENCY);
+    const settled = await Promise.all(batch.map(validateSweepResult));
+    for (const result of settled) {
+      if (result) validated.push(result);
+    }
+    if (validated.length >= maxResults) break;
   }
 
-  const settled = await Promise.all(candidates.map(validateSweepResult));
-  return settled
-    .filter((r): r is SweepResult => r !== null)
+  return validated
     .sort((a, b) => b.relevanceScore - a.relevanceScore)
-    .slice(0, MAX_RESULTS);
+    .slice(0, maxResults);
 }
 
-async function searchWithMistral(query: string, excluded: string[]): Promise<SweepResult[]> {
+async function finalizeSweepResults(
+  candidates: SweepResult[],
+  options: { skipValidation?: boolean } = {},
+  maxResults = resolveSweepMaxResults()
+): Promise<SweepResult[]> {
+  const ranked = candidates.slice().sort((a, b) => b.relevanceScore - a.relevanceScore);
+
+  if (options.skipValidation) {
+    return ranked.slice(0, maxResults);
+  }
+
+  return validateSweepResults(ranked, maxResults);
+}
+
+async function searchWithMistral(
+  query: string,
+  excluded: string[],
+  maxResults: number
+): Promise<SweepResult[]> {
   const userPrompt =
     excluded.length > 0
       ? `${query}\n\nAvoid these URLs because they are already in the user's current sweep/library:\n${excluded.join("\n")}`
@@ -115,10 +137,10 @@ async function searchWithMistral(query: string, excluded: string[]): Promise<Swe
     openRouterModel:
       process.env.OPENROUTER_SEARCH_MODEL?.trim() ?? DEFAULT_OPENROUTER_SEARCH_MODEL,
     messages: [
-      { role: "system", content: SWEEP_SYSTEM_PROMPT },
+      { role: "system", content: buildSweepSystemPrompt(maxResults) },
       { role: "user", content: userPrompt },
     ],
-    maxTokens: 4500,
+    maxTokens: 8000,
     temperature: 0.2,
     timeoutMs: 55000,
     responseFormat: { type: "json_object" },
@@ -147,7 +169,7 @@ async function searchWithMistral(query: string, excluded: string[]): Promise<Swe
       };
     })
     .filter((r): r is SweepResult => r !== null)
-    .slice(0, MAX_AI_CANDIDATES);
+    .slice(0, maxResults);
 }
 
 export async function POST(request: NextRequest) {
@@ -155,21 +177,22 @@ export async function POST(request: NextRequest) {
     const body = (await request.json()) as { query?: string; excludeUrls?: string[] };
     const query = body.query?.trim() || "Find mechanical engineering documents";
     const excluded = (body.excludeUrls ?? []).slice(0, 500);
+    const maxResults = resolveSweepMaxResults();
 
     if (exaSearchEnabled()) {
       try {
-        const exaCandidates = (await searchExa(query, excluded)).slice(0, MAX_AI_CANDIDATES);
-        const results = await finalizeSweepResults(exaCandidates, { skipValidation: true });
-        return NextResponse.json({ results, provider: "exa" });
+        const exaCandidates = await searchExa(query, excluded, maxResults);
+        const results = await finalizeSweepResults(exaCandidates, { skipValidation: true }, maxResults);
+        return NextResponse.json({ results, provider: "exa", maxResults });
       } catch (error) {
         const reason = error instanceof Error ? error.message : "Exa search failed";
         console.warn(`Exa search failed, falling back to Mistral: ${reason}`);
       }
     }
 
-    const mistralCandidates = await searchWithMistral(query, excluded);
-    const results = await finalizeSweepResults(mistralCandidates);
-    return NextResponse.json({ results, provider: "mistral" });
+    const mistralCandidates = await searchWithMistral(query, excluded, maxResults);
+    const results = await finalizeSweepResults(mistralCandidates, {}, maxResults);
+    return NextResponse.json({ results, provider: "mistral", maxResults });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Sweep failed";
     return NextResponse.json({ error: message }, { status: 500 });

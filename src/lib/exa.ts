@@ -1,5 +1,6 @@
 import { detectDocTypeFromUrl } from "@/lib/parser";
 import { buildPrefetchedContent } from "@/lib/document-content";
+import { resolveExaExcludeDomainLimit, resolveSweepMaxResults } from "@/lib/sweep-limits";
 import type { SweepResult } from "@/types";
 
 interface ExaSearchResult {
@@ -41,7 +42,11 @@ export function mapExaResult(result: ExaSearchResult, index: number): SweepResul
   };
 }
 
-export async function searchExa(query: string, excludeUrls: string[] = []): Promise<SweepResult[]> {
+export async function searchExa(
+  query: string,
+  excludeUrls: string[] = [],
+  maxResults = resolveSweepMaxResults()
+): Promise<SweepResult[]> {
   const apiKey = process.env.EXA_API_KEY?.trim();
   if (!apiKey) {
     throw new Error("EXA_API_KEY is not configured");
@@ -49,10 +54,7 @@ export async function searchExa(query: string, excludeUrls: string[] = []): Prom
 
   const baseUrl = (process.env.EXA_BASE_URL ?? "https://api.exa.ai").trim();
   const searchType = process.env.EXA_SEARCH_TYPE?.trim() || "fast";
-  const numResults = Math.min(
-    Math.max(Number(process.env.EXA_NUM_RESULTS ?? 32), 1),
-    100
-  );
+  const numResults = resolveSweepMaxResults(maxResults);
 
   const excludedDomains = Array.from(
     new Set(
@@ -60,7 +62,7 @@ export async function searchExa(query: string, excludeUrls: string[] = []): Prom
         .map(hostnameFromUrl)
         .filter((host): host is string => Boolean(host))
     )
-  ).slice(0, 120);
+  ).slice(0, resolveExaExcludeDomainLimit());
 
   const response = await fetch(`${baseUrl}/search`, {
     method: "POST",

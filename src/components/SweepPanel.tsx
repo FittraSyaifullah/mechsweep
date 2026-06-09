@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { DEFAULT_SWEEP_MAX_RESULTS } from "@/lib/constants";
 import type { SweepResult } from "@/types";
 import Button from "@/components/ui/Button";
 import { Spinner } from "@/components/ui/Icons";
@@ -103,7 +104,7 @@ export default function SweepPanel({ onAdd, addedUrls }: SweepPanelProps) {
   return (
     <div className="space-y-4">
       <p className="text-sm text-slate-600">
-        Search the web for up to 32 publicly accessible mechanical engineering documents per sweep.
+        Search the web for up to {DEFAULT_SWEEP_MAX_RESULTS} publicly accessible mechanical engineering documents per sweep.
         Use Sweep more to append additional unique resources.
       </p>
 

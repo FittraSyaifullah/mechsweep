@@ -3,3 +3,15 @@ export const MAX_LIBRARY_DOCUMENTS = 5000;
 
 /** Debounce delay before persisting library changes (ms). */
 export const LIBRARY_SAVE_DEBOUNCE_MS = 1000;
+
+/** Default web sweep results returned per search request. */
+export const DEFAULT_SWEEP_MAX_RESULTS = 100;
+
+/** Hard cap for a single sweep request (Exa API limit). */
+export const MAX_SWEEP_RESULTS = 100;
+
+/** Minimum sweep results per request. */
+export const MIN_SWEEP_RESULTS = 1;
+
+/** Maximum domains Exa can exclude per request. */
+export const MAX_EXA_EXCLUDE_DOMAINS = 500;
