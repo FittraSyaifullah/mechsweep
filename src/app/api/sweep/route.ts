@@ -1,17 +1,18 @@
 import { NextRequest, NextResponse } from "next/server";
 import { callChatAI } from "@/lib/ai";
 import { searchExa, describeExaSearchProfile } from "@/lib/exa";
-import { resolveEffectiveExaBatchSize } from "@/lib/exa-config";
+import { buildExaExcludeDomains, resolveEffectiveExaBatchSize } from "@/lib/exa-config";
 import { fetchRemoteUrl } from "@/lib/fetch-document";
-import { readJsonBody } from "@/lib/json-safe";
+import { readJsonBody, serializeForJsonResponse } from "@/lib/json-safe";
+import { sanitizeSweepUrl } from "@/lib/sweep-payload";
+import { MAX_EXA_EXCLUDE_DOMAINS, SWEEP_MAX_EXCLUDE_URLS } from "@/lib/constants";
+import { sanitizeSweepResults } from "@/lib/sweep-sanitize";
+import { resolveSweepRequestLimit } from "@/lib/sweep-limits";
 import {
   requireExaApiKey,
   resolveWebSearchProvider,
   sweepMistralFallbackEnabled,
 } from "@/lib/search-provider";
-import { SWEEP_MAX_EXCLUDE_URLS } from "@/lib/constants";
-import { sanitizeSweepResults } from "@/lib/sweep-sanitize";
-import { resolveSweepRequestLimit } from "@/lib/sweep-limits";
 import {
   detectDocTypeFromContentType,
   detectDocTypeFromUrl,
@@ -23,7 +24,7 @@ import type { DocType, SweepResult } from "@/types";
 
 const VALIDATE_TIMEOUT_MS = 12000;
 const VALIDATE_CONCURRENCY = 20;
-export const maxDuration = 10;
+export const maxDuration = 60;
 const MAX_FETCH_BYTES = 15 * 1024 * 1024;
 const DEFAULT_MISTRAL_SEARCH_MODEL = "mistral-small-latest";
 const DEFAULT_OPENROUTER_SEARCH_MODEL = "perplexity/sonar-pro";
@@ -190,11 +191,25 @@ export async function POST(request: NextRequest) {
     const data = await readJsonBody<{
       query?: string;
       excludeUrls?: string[];
+      excludeDomains?: string[];
       maxResults?: number;
-    }>(request, { maxBytes: 512_000, label: "Sweep request" });
+    }>(request, { maxBytes: 256_000, label: "Sweep request" });
 
     const query = data.query?.trim() || "Find mechanical engineering documents";
-    const excluded = (data.excludeUrls ?? []).slice(0, SWEEP_MAX_EXCLUDE_URLS);
+    const excluded = (data.excludeUrls ?? [])
+      .map((url) => sanitizeSweepUrl(String(url)))
+      .filter((url): url is string => Boolean(url))
+      .slice(0, SWEEP_MAX_EXCLUDE_URLS);
+    const domainSet = new Set<string>();
+    for (const domain of data.excludeDomains ?? []) {
+      const trimmed = domain.trim().toLowerCase();
+      if (trimmed) domainSet.add(trimmed);
+    }
+    for (const domain of buildExaExcludeDomains(excluded)) {
+      domainSet.add(domain);
+      if (domainSet.size >= MAX_EXA_EXCLUDE_DOMAINS) break;
+    }
+    const excludeDomains = Array.from(domainSet).slice(0, MAX_EXA_EXCLUDE_DOMAINS);
     const maxResults =
       data.maxResults !== undefined
         ? resolveSweepRequestLimit(data.maxResults)
@@ -205,16 +220,19 @@ export async function POST(request: NextRequest) {
     if (webProvider === "exa") {
       requireExaApiKey();
       try {
-        const exaCandidates = await searchExa(query, excluded, maxResults);
+        const exaCandidates = await searchExa(query, excluded, maxResults, excludeDomains);
         const results = compactSweepResults(
           await finalizeSweepResults(exaCandidates, { skipValidation: true }, maxResults)
         );
-        return NextResponse.json({
-          results,
-          provider: "exa",
-          maxResults,
-          exa: exaProfile,
-        });
+        return new NextResponse(
+          serializeForJsonResponse({
+            results,
+            provider: "exa",
+            maxResults,
+            exa: exaProfile,
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        );
       } catch (error) {
         const reason = error instanceof Error ? error.message : "Exa search failed";
         if (!sweepMistralFallbackEnabled()) {

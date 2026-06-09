@@ -13,7 +13,7 @@ describe("exa-config", () => {
   });
 
   it("defaults to fast search type", () => {
-    expect(resolveExaSearchType()).toBe("fast");
+    expect(resolveExaSearchType()).toBe("auto");
   });
 
   it("builds a mechanical engineering focused query", () => {
@@ -21,19 +21,19 @@ describe("exa-config", () => {
     expect(buildExaSearchQuery("heat transfer")).toMatch(/mechanical engineering/i);
   });
 
-  it("requests highlights with max numResults (lightweight by default)", () => {
+  it("requests highlights and summaries with max numResults", () => {
     const body = buildExaSearchRequestBody({
       query: "robotics",
       numResults: 100,
       excludeUrls: ["https://example.edu/a.pdf", "https://other.org/b.pdf"],
     });
 
-    expect(body.type).toBe("fast");
+    expect(body.type).toBe("auto");
     expect(body.numResults).toBe(100);
     expect(body.contents).toMatchObject({
       highlights: { maxCharacters: expect.any(Number) },
+      summary: true,
     });
-    expect(body.contents).not.toHaveProperty("summary");
     expect(body.excludeDomains).toEqual(expect.arrayContaining(["example.edu", "other.org"]));
   });
 

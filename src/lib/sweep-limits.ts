@@ -106,12 +106,12 @@ export function resolveExaRequestTimeoutMs(
       : searchType.startsWith("deep")
         ? 45_000
         : searchType === "auto"
-          ? 12_000
+          ? 35_000
           : searchType === "fast"
-            ? 9_000
-            : 8_000;
+            ? 12_000
+            : 10_000;
 
-  return Math.min(safeCap, base, 8_000 + Math.max(numResults, 1) * 350);
+  return Math.min(safeCap, base, 8_000 + Math.max(numResults, 1) * 450);
 }
 
 export function resolveSweepServerTimeoutMs(): number {

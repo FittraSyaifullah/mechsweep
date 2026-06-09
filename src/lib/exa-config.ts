@@ -38,6 +38,7 @@ export interface ExaSearchRequestOptions {
   query: string;
   numResults: number;
   excludeUrls?: string[];
+  excludeDomains?: string[];
 }
 
 export interface ExaSearchRequestBody {
@@ -106,10 +107,11 @@ export function buildExaExcludeDomains(excludeUrls: string[] = []): string[] {
 }
 
 export function buildExaContentsOptions(numResults: number): Record<string, unknown> {
-  const highlightBudget = Math.min(1500, resolveExaTextMaxCharacters(numResults));
+  const highlightBudget = Math.min(2000, resolveExaTextMaxCharacters(numResults));
+  const lightweight = process.env.EXA_LIGHTWEIGHT?.trim().toLowerCase() === "true";
   const fullContents = process.env.EXA_FULL_CONTENTS?.trim().toLowerCase() === "true";
 
-  if (fullContents && exaIncludesFullText(numResults)) {
+  if (!lightweight && fullContents && exaIncludesFullText(numResults)) {
     return {
       highlights: true,
       summary: true,
@@ -117,9 +119,15 @@ export function buildExaContentsOptions(numResults: number): Record<string, unkn
     };
   }
 
-  // Lightweight: highlights only (no summary LLM pass) — fits Vercel Hobby timeouts.
+  if (lightweight) {
+    return {
+      highlights: { maxCharacters: Math.min(1500, highlightBudget) },
+    };
+  }
+
   return {
     highlights: { maxCharacters: highlightBudget },
+    summary: true,
   };
 }
 
@@ -155,7 +163,7 @@ export function resolveEffectiveExaBatchSize(): number {
     return Math.min(configured, Number(process.env.EXA_DEEP_BATCH_SIZE ?? 10));
   }
   if (searchType === "auto") {
-    return Math.min(configured, Number(process.env.EXA_AUTO_BATCH_SIZE ?? 15));
+    return Math.min(configured, Number(process.env.EXA_AUTO_BATCH_SIZE ?? 50));
   }
   return configured;
 }
@@ -166,7 +174,10 @@ export function buildExaSearchRequestBody(
   const searchType = resolveExaSearchType();
   const numResults = Math.min(Math.max(Math.floor(options.numResults), 1), 100);
   const includeDomains = resolveExaIncludeDomains();
-  const excludeDomains = buildExaExcludeDomains(options.excludeUrls);
+  const excludeDomains =
+    options.excludeDomains && options.excludeDomains.length > 0
+      ? options.excludeDomains.slice(0, resolveExaExcludeDomainLimit())
+      : buildExaExcludeDomains(options.excludeUrls);
   const category = resolveExaCategory();
   const additionalQueries = resolveExaAdditionalQueries(options.query);
 

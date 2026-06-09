@@ -1,30 +1,20 @@
-import {
-  DEFAULT_SWEEP_SESSION_MAX,
-  SWEEP_BATCH_SIZE,
-  SWEEP_MAX_EXCLUDE_URLS,
-} from "@/lib/constants";
 import { fetchJson, ApiResponseError } from "@/lib/fetch-json";
+import { buildCompactSweepPayload } from "@/lib/sweep-payload";
+import { SWEEP_BATCH_SIZE, SWEEP_MAX_EXCLUDE_URLS } from "@/lib/constants";
 import { resolveSweepSessionMax, sweepBatchCount } from "@/lib/sweep-limits";
 import type { SweepResult } from "@/types";
 
-/** Cap exclude URLs so sweep POST bodies stay valid JSON (library can hold thousands). */
+/** @deprecated Use buildCompactSweepPayload — kept for tests. */
 export function buildSweepExcludeUrls(
   libraryUrls: string[],
   sweepUrls: string[],
   max = SWEEP_MAX_EXCLUDE_URLS
 ): string[] {
-  const seen = new Set<string>();
-  const merged: string[] = [];
-
-  for (const url of [...sweepUrls, ...libraryUrls]) {
-    const trimmed = url.trim();
-    if (!trimmed || seen.has(trimmed)) continue;
-    seen.add(trimmed);
-    merged.push(trimmed);
-    if (merged.length >= max) break;
-  }
-
-  return merged;
+  return buildCompactSweepPayload({
+    libraryUrls,
+    sweepUrls,
+    maxResults: 1,
+  }).excludeUrls.slice(0, max);
 }
 
 export interface SweepBatchResponse {
@@ -73,18 +63,22 @@ const CLIENT_SWEEP_TIMEOUT_MS = 120_000;
 
 export async function fetchSweepBatch(
   query: string,
-  excludeUrls: string[],
+  libraryUrls: string[],
+  sweepUrls: string[],
   batchSize: number
 ): Promise<SweepBatchResponse & { ok: boolean; status: number }> {
+  const payload = buildCompactSweepPayload({
+    query,
+    libraryUrls,
+    sweepUrls,
+    maxResults: batchSize,
+  });
+
   try {
     const { response, data } = await fetchJson<SweepBatchResponse>("/api/sweep", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        query: query || undefined,
-        excludeUrls,
-        maxResults: batchSize,
-      }),
+      body: JSON.stringify(payload),
       signal: AbortSignal.timeout(CLIENT_SWEEP_TIMEOUT_MS),
     });
 
@@ -122,9 +116,12 @@ export async function runBatchedSweep(options: BatchedSweepOptions): Promise<Bat
   for (let batchIndex = 0; batchIndex < batchTotal; batchIndex++) {
     onProgress?.(batchIndex + 1, batchTotal);
 
-    const batchExclude = buildSweepExcludeUrls(excludeUrls, merged.map((result) => result.url));
-
-    const batch = await fetchSweepBatch(query, batchExclude, batchSize);
+    const batch = await fetchSweepBatch(
+      query,
+      excludeUrls,
+      merged.map((result) => result.url),
+      batchSize
+    );
     if (!batch.ok) {
       throw new Error(batch.error ?? "Sweep failed");
     }

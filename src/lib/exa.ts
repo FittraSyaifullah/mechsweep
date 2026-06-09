@@ -45,7 +45,8 @@ export function mapExaResult(result: ExaSearchResult, index: number): SweepResul
 export async function searchExa(
   query: string,
   excludeUrls: string[] = [],
-  maxResults = resolveSweepMaxResults()
+  maxResults = resolveSweepMaxResults(),
+  excludeDomains?: string[]
 ): Promise<SweepResult[]> {
   const apiKey = requireExaApiKey();
   const baseUrl = (process.env.EXA_BASE_URL ?? "https://api.exa.ai").trim();
@@ -55,6 +56,7 @@ export async function searchExa(
     query,
     numResults,
     excludeUrls,
+    excludeDomains,
   });
   const requestTimeoutMs = resolveExaRequestTimeoutMs(numResults, profile.searchType);
 

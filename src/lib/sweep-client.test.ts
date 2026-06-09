@@ -29,7 +29,7 @@ describe("mergeSweepResults", () => {
 });
 
 describe("sweepBatchCount", () => {
-  it("plans ten batches for 200 results at size 20", () => {
+  it("plans ten batches for 500 results at size 50", () => {
     expect(sweepBatchCount(DEFAULT_SWEEP_SESSION_MAX, SWEEP_BATCH_SIZE)).toBe(10);
   });
 
@@ -47,7 +47,10 @@ describe("runBatchedSweep", () => {
     vi.stubGlobal(
       "fetch",
       vi.fn().mockImplementation(async (_input, init) => {
-        const body = JSON.parse(String(init?.body)) as { excludeUrls?: string[] };
+        const body = JSON.parse(String(init?.body)) as {
+          excludeUrls?: string[];
+          excludeDomains?: string[];
+        };
         if ((body.excludeUrls ?? []).includes("https://a.test/1")) {
           return {
             ok: true,
