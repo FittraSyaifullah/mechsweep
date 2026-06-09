@@ -9,8 +9,9 @@ import type { DocType, SweepResult } from "@/types";
 
 const VALIDATE_TIMEOUT_MS = 12000;
 const MAX_RESULTS = 24;
+export const maxDuration = 60;
 const MAX_FETCH_BYTES = 15 * 1024 * 1024;
-const DEFAULT_MISTRAL_SEARCH_MODEL = "mistral-large-latest";
+const DEFAULT_MISTRAL_SEARCH_MODEL = "mistral-small-latest";
 const DEFAULT_OPENROUTER_SEARCH_MODEL = "perplexity/sonar-pro";
 
 const SWEEP_SYSTEM_PROMPT = `You are a mechanical engineering research agent. Find 20-30 real, publicly accessible mechanical engineering documents (PDFs, technical reports, datasheets, textbooks, standards summaries, or CSV datasets) relevant to the user's query.
@@ -112,6 +113,7 @@ export async function POST(request: NextRequest) {
       ],
       maxTokens: 4000,
       temperature: 0.2,
+      timeoutMs: 55000,
     });
 
     const parsed = parseJsonFromResponse<SweepResult[]>(rawText);
