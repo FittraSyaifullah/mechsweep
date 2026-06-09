@@ -1,6 +1,11 @@
 import { detectDocTypeFromUrl } from "@/lib/parser";
 import { buildPrefetchedContent } from "@/lib/document-content";
-import { resolveExaExcludeDomainLimit, resolveSweepMaxResults } from "@/lib/sweep-limits";
+import {
+  exaIncludesFullText,
+  resolveExaExcludeDomainLimit,
+  resolveExaTextMaxCharacters,
+  resolveSweepMaxResults,
+} from "@/lib/sweep-limits";
 import type { SweepResult } from "@/types";
 
 interface ExaSearchResult {
@@ -55,6 +60,7 @@ export async function searchExa(
   const baseUrl = (process.env.EXA_BASE_URL ?? "https://api.exa.ai").trim();
   const searchType = process.env.EXA_SEARCH_TYPE?.trim() || "fast";
   const numResults = resolveSweepMaxResults(maxResults);
+  const includeFullText = exaIncludesFullText(numResults);
 
   const excludedDomains = Array.from(
     new Set(
@@ -70,25 +76,35 @@ export async function searchExa(
       "Content-Type": "application/json",
       "x-api-key": apiKey,
     },
-    signal: AbortSignal.timeout(30000),
+    signal: AbortSignal.timeout(45_000),
     body: JSON.stringify({
       query: `mechanical engineering documents PDF datasheets CAD STL STEP DWG JSON CSV markdown zip textbooks standards: ${query}`,
       type: searchType,
       numResults,
       ...(excludedDomains.length > 0 ? { excludeDomains: excludedDomains } : {}),
-      contents: {
-        highlights: true,
-        text: { maxCharacters: 12000 },
-      },
+      contents: includeFullText
+        ? {
+            highlights: true,
+            text: { maxCharacters: resolveExaTextMaxCharacters(numResults) },
+          }
+        : {
+            highlights: { maxCharacters: resolveExaTextMaxCharacters(numResults) },
+          },
     }),
   });
 
   if (!response.ok) {
     const errText = await response.text();
-    throw new Error(`Exa API error (${response.status}): ${errText}`);
+    throw new Error(`Exa API error (${response.status}): ${errText.slice(0, 300)}`);
   }
 
-  const data = (await response.json()) as { results?: ExaSearchResult[] };
+  const raw = await response.text();
+  let data: { results?: ExaSearchResult[] };
+  try {
+    data = JSON.parse(raw) as { results?: ExaSearchResult[] };
+  } catch {
+    throw new Error(`Exa API returned invalid JSON: ${raw.slice(0, 200)}`);
+  }
   const excluded = new Set(excludeUrls);
 
   return (data.results ?? [])

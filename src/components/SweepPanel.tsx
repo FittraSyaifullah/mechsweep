@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { DEFAULT_SWEEP_MAX_RESULTS } from "@/lib/constants";
+import { fetchJson } from "@/lib/fetch-json";
 import type { SweepResult } from "@/types";
 import Button from "@/components/ui/Button";
 import { Spinner } from "@/components/ui/Icons";
@@ -46,7 +47,11 @@ export default function SweepPanel({ onAdd, addedUrls }: SweepPanelProps) {
     setHasSearched(true);
 
     try {
-      const res = await fetch("/api/sweep", {
+      const { response: res, data } = await fetchJson<{
+        results?: SweepResult[];
+        provider?: string;
+        error?: string;
+      }>("/api/sweep", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -56,11 +61,6 @@ export default function SweepPanel({ onAdd, addedUrls }: SweepPanelProps) {
             : Array.from(addedUrls),
         }),
       });
-      const data = (await res.json()) as {
-        results?: SweepResult[];
-        provider?: string;
-        error?: string;
-      };
       if (!res.ok) throw new Error(data.error ?? "Sweep failed");
       setProvider(data.provider ?? "exa");
       const nextResults = data.results ?? [];

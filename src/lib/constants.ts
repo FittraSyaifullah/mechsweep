@@ -14,4 +14,10 @@ export const MAX_SWEEP_RESULTS = 100;
 export const MIN_SWEEP_RESULTS = 1;
 
 /** Maximum domains Exa can exclude per request. */
-export const MAX_EXA_EXCLUDE_DOMAINS = 500;
+export const MAX_EXA_EXCLUDE_DOMAINS = 50;
+
+/** Total character budget for Exa page text across all sweep results. */
+export const EXA_TOTAL_TEXT_BUDGET = 120_000;
+
+/** Max prefetched text returned per sweep result in API responses. */
+export const SWEEP_PREFETCH_MAX_CHARS = 2_500;

@@ -1,5 +1,6 @@
 import {
   DEFAULT_SWEEP_MAX_RESULTS,
+  EXA_TOTAL_TEXT_BUDGET,
   MAX_EXA_EXCLUDE_DOMAINS,
   MAX_SWEEP_RESULTS,
   MIN_SWEEP_RESULTS,
@@ -20,4 +21,15 @@ export function resolveSweepMaxResults(override?: number): number {
 
 export function resolveExaExcludeDomainLimit(): number {
   return MAX_EXA_EXCLUDE_DOMAINS;
+}
+
+/** Scale Exa text extraction so large sweeps stay within payload/time limits. */
+export function resolveExaTextMaxCharacters(numResults: number): number {
+  const count = Math.max(numResults, 1);
+  return Math.min(12_000, Math.max(1_500, Math.floor(EXA_TOTAL_TEXT_BUDGET / count)));
+}
+
+/** Full page text is only fetched for smaller sweeps; larger ones rely on highlights. */
+export function exaIncludesFullText(numResults: number): boolean {
+  return numResults < 50;
 }

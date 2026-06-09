@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { callChatAI } from "@/lib/ai";
 import { exaSearchEnabled, searchExa } from "@/lib/exa";
 import { fetchRemoteUrl } from "@/lib/fetch-document";
+import { SWEEP_PREFETCH_MAX_CHARS } from "@/lib/constants";
 import { resolveSweepMaxResults } from "@/lib/sweep-limits";
 import {
   detectDocTypeFromContentType,
@@ -14,7 +15,7 @@ import type { DocType, SweepResult } from "@/types";
 
 const VALIDATE_TIMEOUT_MS = 12000;
 const VALIDATE_CONCURRENCY = 20;
-export const maxDuration = 60;
+export const maxDuration = 120;
 const MAX_FETCH_BYTES = 15 * 1024 * 1024;
 const DEFAULT_MISTRAL_SEARCH_MODEL = "mistral-small-latest";
 const DEFAULT_OPENROUTER_SEARCH_MODEL = "perplexity/sonar-pro";
@@ -142,7 +143,7 @@ async function searchWithMistral(
     ],
     maxTokens: 8000,
     temperature: 0.2,
-    timeoutMs: 55000,
+    timeoutMs: 25_000,
     responseFormat: { type: "json_object" },
   });
 
@@ -172,6 +173,18 @@ async function searchWithMistral(
     .slice(0, maxResults);
 }
 
+function compactSweepResults(results: SweepResult[]): SweepResult[] {
+  return results.map((result) => {
+    if (!result.prefetchedText || result.prefetchedText.length <= SWEEP_PREFETCH_MAX_CHARS) {
+      return result;
+    }
+    return {
+      ...result,
+      prefetchedText: result.prefetchedText.slice(0, SWEEP_PREFETCH_MAX_CHARS),
+    };
+  });
+}
+
 export async function POST(request: NextRequest) {
   try {
     const body = (await request.json()) as { query?: string; excludeUrls?: string[] };
@@ -182,7 +195,9 @@ export async function POST(request: NextRequest) {
     if (exaSearchEnabled()) {
       try {
         const exaCandidates = await searchExa(query, excluded, maxResults);
-        const results = await finalizeSweepResults(exaCandidates, { skipValidation: true }, maxResults);
+        const results = compactSweepResults(
+          await finalizeSweepResults(exaCandidates, { skipValidation: true }, maxResults)
+        );
         return NextResponse.json({ results, provider: "exa", maxResults });
       } catch (error) {
         const reason = error instanceof Error ? error.message : "Exa search failed";
@@ -191,7 +206,9 @@ export async function POST(request: NextRequest) {
     }
 
     const mistralCandidates = await searchWithMistral(query, excluded, maxResults);
-    const results = await finalizeSweepResults(mistralCandidates, {}, maxResults);
+    const results = compactSweepResults(
+      await finalizeSweepResults(mistralCandidates, {}, maxResults)
+    );
     return NextResponse.json({ results, provider: "mistral", maxResults });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Sweep failed";
