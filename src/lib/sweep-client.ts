@@ -1,9 +1,9 @@
 import {
-  DEFAULT_SWEEP_MAX_RESULTS,
+  DEFAULT_SWEEP_SESSION_MAX,
   SWEEP_BATCH_SIZE,
 } from "@/lib/constants";
 import { fetchJson } from "@/lib/fetch-json";
-import { sweepBatchCount } from "@/lib/sweep-limits";
+import { resolveSweepSessionMax, sweepBatchCount } from "@/lib/sweep-limits";
 import type { SweepResult } from "@/types";
 
 export interface SweepBatchResponse {
@@ -75,7 +75,7 @@ export async function runBatchedSweep(options: BatchedSweepOptions): Promise<Bat
   const {
     query,
     excludeUrls,
-    totalTarget = DEFAULT_SWEEP_MAX_RESULTS,
+    totalTarget = resolveSweepSessionMax(),
     batchSize = SWEEP_BATCH_SIZE,
     singleBatch = false,
     existingResults = [],

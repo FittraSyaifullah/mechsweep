@@ -2,11 +2,11 @@
 
 import { useState } from "react";
 import {
-  DEFAULT_SWEEP_MAX_RESULTS,
+  DEFAULT_SWEEP_SESSION_MAX,
   SWEEP_BATCH_SIZE,
 } from "@/lib/constants";
 import { runBatchedSweep } from "@/lib/sweep-client";
-import { sweepBatchCount } from "@/lib/sweep-limits";
+import { resolveSweepSessionMax, sweepBatchCount } from "@/lib/sweep-limits";
 import type { SweepResult } from "@/types";
 import Button from "@/components/ui/Button";
 import { Spinner } from "@/components/ui/Icons";
@@ -53,10 +53,11 @@ export default function SweepPanel({ onAdd, addedUrls }: SweepPanelProps) {
     setHasSearched(true);
 
     try {
+      const sessionMax = resolveSweepSessionMax();
       const outcome = await runBatchedSweep({
         query: q,
         excludeUrls: Array.from(addedUrls),
-        totalTarget: DEFAULT_SWEEP_MAX_RESULTS,
+        totalTarget: sessionMax,
         batchSize: SWEEP_BATCH_SIZE,
         singleBatch: append,
         existingResults: append ? results : [],
@@ -95,14 +96,15 @@ export default function SweepPanel({ onAdd, addedUrls }: SweepPanelProps) {
   }
 
   const busy = loading || adding;
-  const plannedBatches = sweepBatchCount(DEFAULT_SWEEP_MAX_RESULTS, SWEEP_BATCH_SIZE);
+  const sessionMax = resolveSweepSessionMax();
+  const plannedBatches = sweepBatchCount(sessionMax, SWEEP_BATCH_SIZE);
 
   return (
     <div className="space-y-4">
       <p className="text-sm text-slate-600">
-        Search the web for up to {DEFAULT_SWEEP_MAX_RESULTS} publicly accessible mechanical
-        engineering documents per sweep ({plannedBatches} batches of {SWEEP_BATCH_SIZE}).
-        Use Sweep more to append another batch.
+        Exa-powered sweep collects up to {sessionMax} unique documents per run ({plannedBatches}{" "}
+        batches of {SWEEP_BATCH_SIZE}, Exa max 100/request). Uses Exa auto search with highlights
+        and summaries. Use Sweep more to append another batch.
       </p>
 
       <div className="flex flex-col gap-2 sm:flex-row">

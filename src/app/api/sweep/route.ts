@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { callChatAI } from "@/lib/ai";
-import { exaSearchEnabled, searchExa } from "@/lib/exa";
+import { exaSearchEnabled, searchExa, describeExaSearchProfile } from "@/lib/exa";
+import { resolveEffectiveExaBatchSize } from "@/lib/exa-config";
 import { fetchRemoteUrl } from "@/lib/fetch-document";
 import { SWEEP_PREFETCH_MAX_CHARS } from "@/lib/constants";
 import { resolveSweepRequestLimit } from "@/lib/sweep-limits";
@@ -15,7 +16,7 @@ import type { DocType, SweepResult } from "@/types";
 
 const VALIDATE_TIMEOUT_MS = 12000;
 const VALIDATE_CONCURRENCY = 20;
-export const maxDuration = 30;
+export const maxDuration = 60;
 const MAX_FETCH_BYTES = 15 * 1024 * 1024;
 const DEFAULT_MISTRAL_SEARCH_MODEL = "mistral-small-latest";
 const DEFAULT_OPENROUTER_SEARCH_MODEL = "perplexity/sonar-pro";
@@ -193,8 +194,12 @@ export async function POST(request: NextRequest) {
       maxResults?: number;
     };
     const query = data.query?.trim() || "Find mechanical engineering documents";
-    const excluded = (data.excludeUrls ?? []).slice(0, 500);
-    const maxResults = resolveSweepRequestLimit(data.maxResults);
+    const excluded = (data.excludeUrls ?? []).slice(0, 1200);
+    const maxResults =
+      data.maxResults !== undefined
+        ? resolveSweepRequestLimit(data.maxResults)
+        : resolveEffectiveExaBatchSize();
+    const exaProfile = describeExaSearchProfile();
 
     if (exaSearchEnabled()) {
       try {
@@ -202,7 +207,12 @@ export async function POST(request: NextRequest) {
         const results = compactSweepResults(
           await finalizeSweepResults(exaCandidates, { skipValidation: true }, maxResults)
         );
-        return NextResponse.json({ results, provider: "exa", maxResults });
+        return NextResponse.json({
+          results,
+          provider: "exa",
+          maxResults,
+          exa: exaProfile,
+        });
       } catch (error) {
         const reason = error instanceof Error ? error.message : "Exa search failed";
         console.warn(`Exa search failed, falling back to Mistral: ${reason}`);

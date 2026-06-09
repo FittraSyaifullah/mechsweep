@@ -1,12 +1,11 @@
 import { detectDocTypeFromUrl } from "@/lib/parser";
 import { buildPrefetchedContent } from "@/lib/document-content";
 import {
-  exaIncludesFullText,
-  resolveExaExcludeDomainLimit,
+  buildExaSearchRequestBody,
+  describeExaSearchProfile,
   resolveExaRequestTimeoutMs,
-  resolveExaTextMaxCharacters,
-  resolveSweepMaxResults,
-} from "@/lib/sweep-limits";
+} from "@/lib/exa-config";
+import { resolveSweepMaxResults } from "@/lib/sweep-limits";
 import type { SweepResult } from "@/types";
 
 interface ExaSearchResult {
@@ -16,14 +15,6 @@ interface ExaSearchResult {
   highlightScores?: number[];
   summary?: string;
   text?: string;
-}
-
-function hostnameFromUrl(url: string): string | null {
-  try {
-    return new URL(url).hostname;
-  } catch {
-    return null;
-  }
 }
 
 export function mapExaResult(result: ExaSearchResult, index: number): SweepResult | null {
@@ -59,18 +50,14 @@ export async function searchExa(
   }
 
   const baseUrl = (process.env.EXA_BASE_URL ?? "https://api.exa.ai").trim();
-  const searchType = process.env.EXA_SEARCH_TYPE?.trim() || "fast";
   const numResults = resolveSweepMaxResults(maxResults);
-  const includeFullText = exaIncludesFullText(numResults);
-  const requestTimeoutMs = resolveExaRequestTimeoutMs(numResults);
-
-  const excludedDomains = Array.from(
-    new Set(
-      excludeUrls
-        .map(hostnameFromUrl)
-        .filter((host): host is string => Boolean(host))
-    )
-  ).slice(0, resolveExaExcludeDomainLimit());
+  const profile = describeExaSearchProfile();
+  const requestBody = buildExaSearchRequestBody({
+    query,
+    numResults,
+    excludeUrls,
+  });
+  const requestTimeoutMs = resolveExaRequestTimeoutMs(numResults, profile.searchType);
 
   let response: Response;
   try {
@@ -81,25 +68,12 @@ export async function searchExa(
         "x-api-key": apiKey,
       },
       signal: AbortSignal.timeout(requestTimeoutMs),
-      body: JSON.stringify({
-        query: `mechanical engineering documents PDF datasheets CAD STL STEP DWG JSON CSV markdown zip textbooks standards: ${query}`,
-        type: searchType,
-        numResults,
-        ...(excludedDomains.length > 0 ? { excludeDomains: excludedDomains } : {}),
-        contents: includeFullText
-          ? {
-              highlights: true,
-              text: { maxCharacters: resolveExaTextMaxCharacters(numResults) },
-            }
-          : {
-              highlights: { maxCharacters: resolveExaTextMaxCharacters(numResults) },
-            },
-      }),
+      body: JSON.stringify(requestBody),
     });
   } catch (error) {
     if (error instanceof DOMException && error.name === "TimeoutError") {
       throw new Error(
-        `Exa search timed out after ${Math.round(requestTimeoutMs / 1000)}s. Retry or use a narrower query.`
+        `Exa search timed out after ${Math.round(requestTimeoutMs / 1000)}s (${profile.searchType}). Retry or use EXA_SEARCH_TYPE=fast.`
       );
     }
     throw error;
@@ -117,6 +91,7 @@ export async function searchExa(
   } catch {
     throw new Error(`Exa API returned invalid JSON: ${raw.slice(0, 200)}`);
   }
+
   const excluded = new Set(excludeUrls);
 
   return (data.results ?? [])
@@ -128,3 +103,5 @@ export function exaSearchEnabled(): boolean {
   const provider = process.env.SEARCH_PROVIDER?.trim().toLowerCase() ?? "exa";
   return provider === "exa" && Boolean(process.env.EXA_API_KEY?.trim());
 }
+
+export { buildExaSearchRequestBody, describeExaSearchProfile };

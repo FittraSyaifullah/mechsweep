@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, afterEach } from "vitest";
-import { DEFAULT_SWEEP_MAX_RESULTS, SWEEP_BATCH_SIZE } from "@/lib/constants";
+import { DEFAULT_SWEEP_SESSION_MAX, SWEEP_BATCH_SIZE } from "@/lib/constants";
 import { mergeSweepResults, runBatchedSweep } from "@/lib/sweep-client";
 import { sweepBatchCount } from "@/lib/sweep-limits";
 import type { SweepResult } from "@/types";
@@ -29,12 +29,12 @@ describe("mergeSweepResults", () => {
 });
 
 describe("sweepBatchCount", () => {
-  it("plans four batches for 100 results at size 25", () => {
-    expect(sweepBatchCount(DEFAULT_SWEEP_MAX_RESULTS, SWEEP_BATCH_SIZE)).toBe(4);
+  it("plans ten batches for 500 results at size 50", () => {
+    expect(sweepBatchCount(DEFAULT_SWEEP_SESSION_MAX, SWEEP_BATCH_SIZE)).toBe(10);
   });
 
   it("returns one batch for sweep more", () => {
-    expect(sweepBatchCount(DEFAULT_SWEEP_MAX_RESULTS, SWEEP_BATCH_SIZE, true)).toBe(1);
+    expect(sweepBatchCount(DEFAULT_SWEEP_SESSION_MAX, SWEEP_BATCH_SIZE, true)).toBe(1);
   });
 });
 

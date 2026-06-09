@@ -1,10 +1,12 @@
 import {
   DEFAULT_SWEEP_MAX_RESULTS,
+  DEFAULT_SWEEP_SESSION_MAX,
   EXA_TOTAL_TEXT_BUDGET,
   MAX_EXA_EXCLUDE_DOMAINS,
   MAX_SWEEP_RESULTS,
   MIN_SWEEP_RESULTS,
   SWEEP_BATCH_SIZE,
+  SWEEP_MAX_BATCHES,
 } from "@/lib/constants";
 
 export function resolveSweepMaxResults(override?: number): number {
@@ -31,6 +33,40 @@ export function resolveSweepBatchSize(override?: number): number {
   return Math.min(Math.max(Math.floor(raw), MIN_SWEEP_RESULTS), MAX_SWEEP_RESULTS);
 }
 
+/** Total unique results to collect across batched Exa calls in one sweep. */
+export function resolveSweepSessionMax(override?: number): number {
+  if (override !== undefined && Number.isFinite(override)) {
+    return Math.min(Math.max(Math.floor(override), MIN_SWEEP_RESULTS), resolveSweepSessionCap());
+  }
+
+  const raw = Number(
+    process.env.SWEEP_SESSION_MAX ?? process.env.SWEEP_MAX_RESULTS ?? DEFAULT_SWEEP_SESSION_MAX
+  );
+  if (!Number.isFinite(raw)) return DEFAULT_SWEEP_SESSION_MAX;
+  return Math.min(Math.max(Math.floor(raw), MIN_SWEEP_RESULTS), resolveSweepSessionCap());
+}
+
+export function resolveSweepMaxBatches(): number {
+  const raw = Number(process.env.SWEEP_MAX_BATCHES ?? SWEEP_MAX_BATCHES);
+  if (!Number.isFinite(raw)) return SWEEP_MAX_BATCHES;
+  return Math.min(Math.max(Math.floor(raw), 1), 50);
+}
+
+export function resolveSweepSessionCap(): number {
+  return resolveSweepBatchSize() * resolveSweepMaxBatches();
+}
+
+export function sweepBatchCount(
+  totalTarget: number,
+  batchSize: number,
+  singleBatch = false
+): number {
+  if (singleBatch) return 1;
+  const maxBatches = resolveSweepMaxBatches();
+  const needed = Math.max(1, Math.ceil(totalTarget / batchSize));
+  return Math.min(needed, maxBatches);
+}
+
 /** Cap a single sweep request to one batch. */
 export function resolveSweepRequestLimit(requested?: number): number {
   const batchSize = resolveSweepBatchSize();
@@ -38,13 +74,10 @@ export function resolveSweepRequestLimit(requested?: number): number {
   return Math.min(resolveSweepMaxResults(requested), batchSize);
 }
 
-export function sweepBatchCount(totalTarget: number, batchSize: number, singleBatch = false): number {
-  if (singleBatch) return 1;
-  return Math.max(1, Math.ceil(totalTarget / batchSize));
-}
-
 export function resolveExaExcludeDomainLimit(): number {
-  return MAX_EXA_EXCLUDE_DOMAINS;
+  const raw = Number(process.env.EXA_EXCLUDE_DOMAIN_LIMIT ?? MAX_EXA_EXCLUDE_DOMAINS);
+  if (!Number.isFinite(raw)) return MAX_EXA_EXCLUDE_DOMAINS;
+  return Math.min(Math.max(Math.floor(raw), 1), MAX_EXA_EXCLUDE_DOMAINS);
 }
 
 /** Scale Exa text extraction so large sweeps stay within payload/time limits. */
@@ -58,7 +91,19 @@ export function exaIncludesFullText(numResults: number): boolean {
   return numResults < resolveSweepBatchSize();
 }
 
-/** Scale Exa fetch timeout with batch size (keeps each request under serverless limits). */
-export function resolveExaRequestTimeoutMs(numResults: number): number {
-  return Math.min(28_000, 8_000 + Math.max(numResults, 1) * 500);
+/** Scale Exa fetch timeout with batch size and search mode. */
+export function resolveExaRequestTimeoutMs(
+  numResults: number,
+  searchType = "auto"
+): number {
+  const base =
+    searchType === "deep-reasoning"
+      ? 55_000
+      : searchType.startsWith("deep")
+        ? 45_000
+        : searchType === "auto"
+          ? 35_000
+          : 22_000;
+
+  return Math.min(base, 8_000 + Math.max(numResults, 1) * 600);
 }
