@@ -21,3 +21,6 @@ export const EXA_TOTAL_TEXT_BUDGET = 120_000;
 
 /** Max prefetched text returned per sweep result in API responses. */
 export const SWEEP_PREFETCH_MAX_CHARS = 2_500;
+
+/** Results fetched per API call to stay within serverless timeouts. */
+export const SWEEP_BATCH_SIZE = 25;

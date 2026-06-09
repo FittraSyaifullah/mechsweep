@@ -3,6 +3,7 @@ import { buildPrefetchedContent } from "@/lib/document-content";
 import {
   exaIncludesFullText,
   resolveExaExcludeDomainLimit,
+  resolveExaRequestTimeoutMs,
   resolveExaTextMaxCharacters,
   resolveSweepMaxResults,
 } from "@/lib/sweep-limits";
@@ -61,6 +62,7 @@ export async function searchExa(
   const searchType = process.env.EXA_SEARCH_TYPE?.trim() || "fast";
   const numResults = resolveSweepMaxResults(maxResults);
   const includeFullText = exaIncludesFullText(numResults);
+  const requestTimeoutMs = resolveExaRequestTimeoutMs(numResults);
 
   const excludedDomains = Array.from(
     new Set(
@@ -70,28 +72,38 @@ export async function searchExa(
     )
   ).slice(0, resolveExaExcludeDomainLimit());
 
-  const response = await fetch(`${baseUrl}/search`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "x-api-key": apiKey,
-    },
-    signal: AbortSignal.timeout(45_000),
-    body: JSON.stringify({
-      query: `mechanical engineering documents PDF datasheets CAD STL STEP DWG JSON CSV markdown zip textbooks standards: ${query}`,
-      type: searchType,
-      numResults,
-      ...(excludedDomains.length > 0 ? { excludeDomains: excludedDomains } : {}),
-      contents: includeFullText
-        ? {
-            highlights: true,
-            text: { maxCharacters: resolveExaTextMaxCharacters(numResults) },
-          }
-        : {
-            highlights: { maxCharacters: resolveExaTextMaxCharacters(numResults) },
-          },
-    }),
-  });
+  let response: Response;
+  try {
+    response = await fetch(`${baseUrl}/search`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-api-key": apiKey,
+      },
+      signal: AbortSignal.timeout(requestTimeoutMs),
+      body: JSON.stringify({
+        query: `mechanical engineering documents PDF datasheets CAD STL STEP DWG JSON CSV markdown zip textbooks standards: ${query}`,
+        type: searchType,
+        numResults,
+        ...(excludedDomains.length > 0 ? { excludeDomains: excludedDomains } : {}),
+        contents: includeFullText
+          ? {
+              highlights: true,
+              text: { maxCharacters: resolveExaTextMaxCharacters(numResults) },
+            }
+          : {
+              highlights: { maxCharacters: resolveExaTextMaxCharacters(numResults) },
+            },
+      }),
+    });
+  } catch (error) {
+    if (error instanceof DOMException && error.name === "TimeoutError") {
+      throw new Error(
+        `Exa search timed out after ${Math.round(requestTimeoutMs / 1000)}s. Retry or use a narrower query.`
+      );
+    }
+    throw error;
+  }
 
   if (!response.ok) {
     const errText = await response.text();

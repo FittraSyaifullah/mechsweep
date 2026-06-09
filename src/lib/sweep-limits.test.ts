@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { DEFAULT_SWEEP_MAX_RESULTS, MAX_SWEEP_RESULTS } from "@/lib/constants";
-import { resolveSweepMaxResults, resolveExaTextMaxCharacters, exaIncludesFullText } from "@/lib/sweep-limits";
+import { resolveSweepMaxResults, resolveExaTextMaxCharacters, exaIncludesFullText, resolveExaRequestTimeoutMs } from "@/lib/sweep-limits";
 
 describe("resolveSweepMaxResults", () => {
   afterEach(() => {
@@ -39,8 +39,13 @@ describe("Exa sweep payload limits", () => {
     expect(resolveExaTextMaxCharacters(100)).toBeGreaterThanOrEqual(1500);
   });
 
-  it("skips full page text for large sweeps", () => {
-    expect(exaIncludesFullText(49)).toBe(true);
-    expect(exaIncludesFullText(50)).toBe(false);
+  it("skips full page text for batch-sized sweeps", () => {
+    expect(exaIncludesFullText(24)).toBe(true);
+    expect(exaIncludesFullText(25)).toBe(false);
+  });
+
+  it("scales Exa timeout with batch size", () => {
+    expect(resolveExaRequestTimeoutMs(25)).toBeLessThanOrEqual(28_000);
+    expect(resolveExaRequestTimeoutMs(25)).toBeGreaterThan(8_000);
   });
 });

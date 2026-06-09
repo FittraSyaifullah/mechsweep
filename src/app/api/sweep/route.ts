@@ -3,7 +3,7 @@ import { callChatAI } from "@/lib/ai";
 import { exaSearchEnabled, searchExa } from "@/lib/exa";
 import { fetchRemoteUrl } from "@/lib/fetch-document";
 import { SWEEP_PREFETCH_MAX_CHARS } from "@/lib/constants";
-import { resolveSweepMaxResults } from "@/lib/sweep-limits";
+import { resolveSweepRequestLimit } from "@/lib/sweep-limits";
 import {
   detectDocTypeFromContentType,
   detectDocTypeFromUrl,
@@ -15,7 +15,7 @@ import type { DocType, SweepResult } from "@/types";
 
 const VALIDATE_TIMEOUT_MS = 12000;
 const VALIDATE_CONCURRENCY = 20;
-export const maxDuration = 120;
+export const maxDuration = 30;
 const MAX_FETCH_BYTES = 15 * 1024 * 1024;
 const DEFAULT_MISTRAL_SEARCH_MODEL = "mistral-small-latest";
 const DEFAULT_OPENROUTER_SEARCH_MODEL = "perplexity/sonar-pro";
@@ -112,7 +112,7 @@ async function validateSweepResults(
 async function finalizeSweepResults(
   candidates: SweepResult[],
   options: { skipValidation?: boolean } = {},
-  maxResults = resolveSweepMaxResults()
+  maxResults = resolveSweepRequestLimit()
 ): Promise<SweepResult[]> {
   const ranked = candidates.slice().sort((a, b) => b.relevanceScore - a.relevanceScore);
 
@@ -141,9 +141,9 @@ async function searchWithMistral(
       { role: "system", content: buildSweepSystemPrompt(maxResults) },
       { role: "user", content: userPrompt },
     ],
-    maxTokens: 8000,
+    maxTokens: 4000,
     temperature: 0.2,
-    timeoutMs: 25_000,
+    timeoutMs: 20_000,
     responseFormat: { type: "json_object" },
   });
 
@@ -187,10 +187,14 @@ function compactSweepResults(results: SweepResult[]): SweepResult[] {
 
 export async function POST(request: NextRequest) {
   try {
-    const body = (await request.json()) as { query?: string; excludeUrls?: string[] };
-    const query = body.query?.trim() || "Find mechanical engineering documents";
-    const excluded = (body.excludeUrls ?? []).slice(0, 500);
-    const maxResults = resolveSweepMaxResults();
+    const data = (await request.json()) as {
+      query?: string;
+      excludeUrls?: string[];
+      maxResults?: number;
+    };
+    const query = data.query?.trim() || "Find mechanical engineering documents";
+    const excluded = (data.excludeUrls ?? []).slice(0, 500);
+    const maxResults = resolveSweepRequestLimit(data.maxResults);
 
     if (exaSearchEnabled()) {
       try {

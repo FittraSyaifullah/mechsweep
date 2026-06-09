@@ -1,8 +1,12 @@
 "use client";
 
 import { useState } from "react";
-import { DEFAULT_SWEEP_MAX_RESULTS } from "@/lib/constants";
-import { fetchJson } from "@/lib/fetch-json";
+import {
+  DEFAULT_SWEEP_MAX_RESULTS,
+  SWEEP_BATCH_SIZE,
+} from "@/lib/constants";
+import { runBatchedSweep } from "@/lib/sweep-client";
+import { sweepBatchCount } from "@/lib/sweep-limits";
 import type { SweepResult } from "@/types";
 import Button from "@/components/ui/Button";
 import { Spinner } from "@/components/ui/Icons";
@@ -34,6 +38,7 @@ export default function SweepPanel({ onAdd, addedUrls }: SweepPanelProps) {
   const [loading, setLoading] = useState(false);
   const [adding, setAdding] = useState(false);
   const [addProgress, setAddProgress] = useState<string | null>(null);
+  const [sweepProgress, setSweepProgress] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [hasSearched, setHasSearched] = useState(false);
   const [provider, setProvider] = useState<string | null>(null);
@@ -44,42 +49,32 @@ export default function SweepPanel({ onAdd, addedUrls }: SweepPanelProps) {
 
     setLoading(true);
     setError(null);
+    setSweepProgress(null);
     setHasSearched(true);
 
     try {
-      const { response: res, data } = await fetchJson<{
-        results?: SweepResult[];
-        provider?: string;
-        error?: string;
-      }>("/api/sweep", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          query: q || undefined,
-          excludeUrls: append
-            ? [...Array.from(addedUrls), ...results.map((result) => result.url)]
-            : Array.from(addedUrls),
-        }),
+      const outcome = await runBatchedSweep({
+        query: q,
+        excludeUrls: Array.from(addedUrls),
+        totalTarget: DEFAULT_SWEEP_MAX_RESULTS,
+        batchSize: SWEEP_BATCH_SIZE,
+        singleBatch: append,
+        existingResults: append ? results : [],
+        onProgress: (batchIndex, total) => {
+          setSweepProgress(
+            total > 1 ? `Batch ${batchIndex} of ${total}…` : "Searching…"
+          );
+        },
       });
-      if (!res.ok) throw new Error(data.error ?? "Sweep failed");
-      setProvider(data.provider ?? "exa");
-      const nextResults = data.results ?? [];
-      setResults((prev) => {
-        const merged = append ? [...prev] : [];
-        const seen = new Set(merged.map((result) => result.url));
-        for (const result of nextResults) {
-          if (!seen.has(result.url)) {
-            merged.push(result);
-            seen.add(result.url);
-          }
-        }
-        return merged;
-      });
+
+      setProvider(outcome.provider ?? "exa");
+      setResults(outcome.results);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Sweep failed");
       if (!append) setResults([]);
     } finally {
       setLoading(false);
+      setSweepProgress(null);
     }
   }
 
@@ -100,12 +95,14 @@ export default function SweepPanel({ onAdd, addedUrls }: SweepPanelProps) {
   }
 
   const busy = loading || adding;
+  const plannedBatches = sweepBatchCount(DEFAULT_SWEEP_MAX_RESULTS, SWEEP_BATCH_SIZE);
 
   return (
     <div className="space-y-4">
       <p className="text-sm text-slate-600">
-        Search the web for up to {DEFAULT_SWEEP_MAX_RESULTS} publicly accessible mechanical engineering documents per sweep.
-        Use Sweep more to append additional unique resources.
+        Search the web for up to {DEFAULT_SWEEP_MAX_RESULTS} publicly accessible mechanical
+        engineering documents per sweep ({plannedBatches} batches of {SWEEP_BATCH_SIZE}).
+        Use Sweep more to append another batch.
       </p>
 
       <div className="flex flex-col gap-2 sm:flex-row">
@@ -153,7 +150,7 @@ export default function SweepPanel({ onAdd, addedUrls }: SweepPanelProps) {
       {loading && (
         <div className="flex items-center justify-center gap-2 py-8 text-sm text-slate-500">
           <Spinner className="h-5 w-5 text-mech-600" />
-          Searching for documents…
+          {sweepProgress ?? "Searching for documents…"}
         </div>
       )}
 
