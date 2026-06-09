@@ -20,6 +20,7 @@ export interface MechDocument {
   content: string;
   summary?: string;
   tags?: string[];
+  keyTopics?: string[];
   category?: string;
   pageCount?: number;
   pages?: DocumentPage[];

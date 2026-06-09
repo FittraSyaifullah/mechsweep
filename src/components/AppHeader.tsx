@@ -9,6 +9,7 @@ interface AppHeaderProps {
   totalCount: number;
   onExport: () => void;
   onClearAll: () => void;
+  maxWidth?: "3xl" | "6xl";
 }
 
 export default function AppHeader({
@@ -17,10 +18,13 @@ export default function AppHeader({
   totalCount,
   onExport,
   onClearAll,
+  maxWidth = "3xl",
 }: AppHeaderProps) {
+  const widthClass = maxWidth === "6xl" ? "max-w-6xl" : "max-w-3xl";
+
   return (
     <header className="border-b border-slate-200 bg-white">
-      <div className="mx-auto flex max-w-3xl items-center justify-between gap-4 px-4 py-4">
+      <div className={`mx-auto flex ${widthClass} items-center justify-between gap-4 px-4 py-4`}>
         <div>
           <Link href="/" className="text-lg font-semibold text-slate-900 hover:text-mech-700">
             MechSweep

@@ -1,14 +1,17 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import type { MechDocument } from "@/types";
 import HighlightText from "@/components/HighlightText";
+import Button from "@/components/ui/Button";
 import { CloseIcon, Spinner } from "@/components/ui/Icons";
 
 interface DocDrawerProps {
   doc: MechDocument | null;
   onClose: () => void;
   searchQuery?: string;
+  onRetry?: (doc: MechDocument) => void;
+  onExport?: (doc: MechDocument) => void;
 }
 
 function statusText(doc: MechDocument): string {
@@ -18,7 +21,15 @@ function statusText(doc: MechDocument): string {
   return doc.status;
 }
 
-export default function DocDrawer({ doc, onClose, searchQuery = "" }: DocDrawerProps) {
+export default function DocDrawer({
+  doc,
+  onClose,
+  searchQuery = "",
+  onRetry,
+  onExport,
+}: DocDrawerProps) {
+  const [copied, setCopied] = useState(false);
+
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       if (e.key === "Escape") onClose();
@@ -33,7 +44,18 @@ export default function DocDrawer({ doc, onClose, searchQuery = "" }: DocDrawerP
     };
   }, [doc, onClose]);
 
+  useEffect(() => {
+    setCopied(false);
+  }, [doc?.id]);
+
   if (!doc) return null;
+
+  async function copyError() {
+    if (!doc?.error) return;
+    await navigator.clipboard.writeText(doc.error);
+    setCopied(true);
+    window.setTimeout(() => setCopied(false), 2000);
+  }
 
   return (
     <div className="fixed inset-0 z-50 flex justify-end">
@@ -72,6 +94,24 @@ export default function DocDrawer({ doc, onClose, searchQuery = "" }: DocDrawerP
               <p className="mt-2 text-sm leading-relaxed text-slate-700">
                 <HighlightText text={doc.summary} query={searchQuery} />
               </p>
+            </section>
+          )}
+
+          {doc.keyTopics && doc.keyTopics.length > 0 && (
+            <section className="mb-5">
+              <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+                Key topics
+              </h3>
+              <div className="mt-2 flex flex-wrap gap-1.5">
+                {doc.keyTopics.map((topic) => (
+                  <span
+                    key={topic}
+                    className="rounded-full bg-mech-50 px-2.5 py-0.5 text-xs text-mech-700"
+                  >
+                    {topic}
+                  </span>
+                ))}
+              </div>
             </section>
           )}
 
@@ -193,6 +233,27 @@ export default function DocDrawer({ doc, onClose, searchQuery = "" }: DocDrawerP
             )}
           </section>
         </div>
+
+        <footer className="flex flex-wrap gap-2 border-t border-slate-200 px-5 py-4">
+          {doc.status === "error" && onRetry && (
+            <Button size="sm" onClick={() => onRetry(doc)}>
+              Retry
+            </Button>
+          )}
+          {doc.status === "ready" && onExport && (
+            <Button size="sm" variant="secondary" onClick={() => onExport(doc)}>
+              Export
+            </Button>
+          )}
+          {doc.error && (
+            <Button size="sm" variant="ghost" onClick={() => void copyError()}>
+              {copied ? "Copied" : "Copy error"}
+            </Button>
+          )}
+          <Button size="sm" variant="ghost" onClick={onClose} className="ml-auto">
+            Close
+          </Button>
+        </footer>
       </aside>
     </div>
   );

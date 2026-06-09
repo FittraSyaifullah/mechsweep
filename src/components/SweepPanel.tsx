@@ -15,7 +15,7 @@ const SUGGESTIONS = [
 ];
 
 interface SweepPanelProps {
-  onAdd: (result: SweepResult) => void;
+  onAdd: (result: SweepResult) => Promise<void>;
   addedUrls: Set<string>;
 }
 
@@ -30,6 +30,8 @@ export default function SweepPanel({ onAdd, addedUrls }: SweepPanelProps) {
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<SweepResult[]>([]);
   const [loading, setLoading] = useState(false);
+  const [adding, setAdding] = useState(false);
+  const [addProgress, setAddProgress] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [hasSearched, setHasSearched] = useState(false);
   const [provider, setProvider] = useState<string | null>(null);
@@ -80,6 +82,24 @@ export default function SweepPanel({ onAdd, addedUrls }: SweepPanelProps) {
     }
   }
 
+  async function handleAddAll() {
+    const pending = results.filter((r) => !addedUrls.has(r.url));
+    if (pending.length === 0 || adding) return;
+
+    setAdding(true);
+    try {
+      for (let i = 0; i < pending.length; i++) {
+        setAddProgress(`Adding ${i + 1}/${pending.length}…`);
+        await onAdd(pending[i]);
+      }
+    } finally {
+      setAdding(false);
+      setAddProgress(null);
+    }
+  }
+
+  const busy = loading || adding;
+
   return (
     <div className="space-y-4">
       <p className="text-sm text-slate-600">
@@ -92,12 +112,12 @@ export default function SweepPanel({ onAdd, addedUrls }: SweepPanelProps) {
           type="text"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && !loading && handleSweep()}
+          onKeyDown={(e) => e.key === "Enter" && !busy && handleSweep()}
           placeholder="e.g. heat transfer, machine design…"
-          disabled={loading}
+          disabled={busy}
           className="input-base flex-1"
         />
-        <Button onClick={() => handleSweep()} loading={loading} className="sm:shrink-0">
+        <Button onClick={() => handleSweep()} loading={loading} disabled={adding} className="sm:shrink-0">
           {loading ? "Searching…" : "Sweep"}
         </Button>
       </div>
@@ -108,7 +128,7 @@ export default function SweepPanel({ onAdd, addedUrls }: SweepPanelProps) {
             key={s}
             type="button"
             onClick={() => handleSweep(s)}
-            disabled={loading}
+            disabled={busy}
             className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs text-slate-600 hover:border-mech-300 hover:text-mech-700 disabled:opacity-50"
           >
             {s}
@@ -119,6 +139,13 @@ export default function SweepPanel({ onAdd, addedUrls }: SweepPanelProps) {
       {error && (
         <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
           {error}
+        </div>
+      )}
+
+      {addProgress && (
+        <div className="flex items-center gap-2 rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-sm text-sky-700">
+          <Spinner className="h-4 w-4" />
+          {addProgress}
         </div>
       )}
 
@@ -146,17 +173,15 @@ export default function SweepPanel({ onAdd, addedUrls }: SweepPanelProps) {
               <button
                 type="button"
                 onClick={() => handleSweep(undefined, true)}
-                disabled={loading}
+                disabled={busy}
                 className="text-xs font-medium text-mech-600 hover:underline disabled:text-slate-400"
               >
                 Sweep more
               </button>
               <button
                 type="button"
-                onClick={() =>
-                  results.filter((r) => !addedUrls.has(r.url)).forEach((r) => onAdd(r))
-                }
-                disabled={results.every((r) => addedUrls.has(r.url))}
+                onClick={() => void handleAddAll()}
+                disabled={busy || results.every((r) => addedUrls.has(r.url))}
                 className="text-xs font-medium text-mech-600 hover:underline disabled:text-slate-400"
               >
                 Add all
@@ -184,8 +209,9 @@ export default function SweepPanel({ onAdd, addedUrls }: SweepPanelProps) {
                 <Button
                   variant={added ? "secondary" : "primary"}
                   size="sm"
-                  onClick={() => onAdd(result)}
-                  disabled={added}
+                  onClick={() => void onAdd(result)}
+                  disabled={added || adding}
+                  loading={adding && !added}
                   className="shrink-0"
                 >
                   {added ? "Added" : "Add"}

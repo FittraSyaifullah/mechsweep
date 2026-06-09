@@ -1,246 +1,20 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useState } from "react";
 import AppHeader from "@/components/AppHeader";
 import ConfirmDialog from "@/components/ui/ConfirmDialog";
 import DocDrawer from "@/components/DocDrawer";
 import DocLibrary from "@/components/DocLibrary";
 import ExportModal from "@/components/ExportModal";
 import { Spinner } from "@/components/ui/Icons";
+import { useDocumentLibrary } from "@/hooks/useDocumentLibrary";
 import { useToast } from "@/components/Toast";
-import {
-  combineFallbackSources,
-  fetchDocumentContent,
-  normalizeImportedContent,
-  recoverContentFromSources,
-  shouldSkipDirectFetch,
-} from "@/lib/document-content";
-import { loadDocuments, saveDocuments } from "@/lib/storage";
-import type { AnalyzeResult, MechDocument } from "@/types";
-
-const ANALYZE_CLIENT_CHARS = 4000;
 
 export default function LibrariesPage() {
   const { toast } = useToast();
-  const [documents, setDocuments] = useState<MechDocument[]>([]);
-  const [hydrated, setHydrated] = useState(false);
-  const [exportDocs, setExportDocs] = useState<MechDocument[] | null>(null);
-  const [showClearConfirm, setShowClearConfirm] = useState(false);
-  const [selectedDoc, setSelectedDoc] = useState<MechDocument | null>(null);
-  const [drawerSearchQuery, setDrawerSearchQuery] = useState("");
+  const library = useDocumentLibrary({ toastOnAnalyzeSuccess: false });
 
-  useEffect(() => {
-    let active = true;
-    void loadDocuments().then((docs) => {
-      if (!active) return;
-      setDocuments(docs);
-      setHydrated(true);
-    });
-    return () => {
-      active = false;
-    };
-  }, []);
-
-  useEffect(() => {
-    if (hydrated) void saveDocuments(documents);
-  }, [documents, hydrated]);
-
-  useEffect(() => {
-    if (!selectedDoc) return;
-    const updated = documents.find((doc) => doc.id === selectedDoc.id);
-    setSelectedDoc(updated ?? null);
-  }, [documents, selectedDoc]);
-
-  function removeDoc(id: string) {
-    setDocuments((prev) => prev.filter((doc) => doc.id !== id));
-    if (selectedDoc?.id === id) setSelectedDoc(null);
-  }
-
-  const embedDoc = useCallback(async (doc: MechDocument) => {
-    try {
-      const res = await fetch("/api/embed", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text: `${doc.title}\n\n${doc.content}` }),
-      });
-      const data = (await res.json()) as { embedding?: number[] };
-      if (!res.ok || !data.embedding) return;
-      setDocuments((prev) =>
-        prev.map((item) => (item.id === doc.id ? { ...item, embedding: data.embedding } : item))
-      );
-    } catch {
-      // Semantic search remains optional when embeddings fail.
-    }
-  }, []);
-
-  const analyzeDoc = useCallback(
-    async (doc: MechDocument) => {
-      if (!doc.content) {
-        toast(`No content to analyze: ${doc.title}`, "error");
-        return;
-      }
-
-      setDocuments((prev) =>
-        prev.map((item) =>
-          item.id === doc.id ? { ...item, status: "processing" as const, error: undefined } : item
-        )
-      );
-
-      try {
-        const res = await fetch("/api/analyze", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            content: doc.content.slice(0, ANALYZE_CLIENT_CHARS),
-            title: doc.title,
-            type: doc.type,
-          }),
-        });
-        const data = (await res.json()) as AnalyzeResult & { error?: string };
-        if (!res.ok) throw new Error(data.error ?? "Analysis failed");
-
-        setDocuments((prev) =>
-          prev.map((item) =>
-            item.id === doc.id
-              ? {
-                  ...item,
-                  status: "ready" as const,
-                  summary: data.summary,
-                  tags: data.tags,
-                  category: data.category,
-                }
-              : item
-          )
-        );
-        void embedDoc(doc);
-      } catch (err) {
-        const message = err instanceof Error ? err.message : "Analysis failed";
-        setDocuments((prev) =>
-          prev.map((item) =>
-            item.id === doc.id ? { ...item, status: "error" as const, error: message } : item
-          )
-        );
-      }
-    },
-    [embedDoc, toast]
-  );
-
-  function selectDoc(doc: MechDocument, searchQuery: string) {
-    setSelectedDoc(doc);
-    setDrawerSearchQuery(searchQuery);
-  }
-
-  function bulkDelete(ids: string[]) {
-    const idSet = new Set(ids);
-    setDocuments((prev) => prev.filter((doc) => !idSet.has(doc.id)));
-    if (selectedDoc && idSet.has(selectedDoc.id)) setSelectedDoc(null);
-    toast(`Deleted ${ids.length} doc${ids.length !== 1 ? "s" : ""}`, "info");
-  }
-
-  const retryDoc = useCallback(
-    async (doc: MechDocument) => {
-      if (doc.source === "sweep" && doc.url) {
-        if (doc.content?.trim() && doc.status === "error") {
-          void analyzeDoc(doc);
-          return;
-        }
-
-        setDocuments((prev) =>
-          prev.map((item) =>
-            item.id === doc.id
-              ? { ...item, status: "processing" as const, error: undefined, content: "" }
-              : item
-          )
-        );
-
-        try {
-          const prefetched = doc.prefetchedText
-            ? normalizeImportedContent(doc.prefetchedText)
-            : "";
-          const fallbackBundle = combineFallbackSources(
-            doc.prefetchedText,
-            doc.summary,
-            doc.title
-          );
-          let content = shouldSkipDirectFetch(doc.url, prefetched) ? prefetched : "";
-          let fetchData: Awaited<ReturnType<typeof fetchDocumentContent>> | null = null;
-
-          if (!content) {
-            fetchData = await fetchDocumentContent(
-              doc.url,
-              doc.type,
-              fallbackBundle || undefined
-            );
-            content = fetchData.text;
-          }
-
-          const docType = fetchData?.type ?? doc.type;
-
-          setDocuments((prev) =>
-            prev.map((item) =>
-              item.id === doc.id
-                ? {
-                    ...item,
-                    type: docType,
-                    content,
-                    sizeBytes: fetchData?.sizeBytes ?? item.sizeBytes,
-                    pageCount: fetchData?.pageCount ?? item.pageCount,
-                    pages: fetchData?.pages ?? item.pages,
-                    tables: fetchData?.tables ?? item.tables,
-                    detectedLanguage: fetchData?.detectedLanguage ?? item.detectedLanguage,
-                    detectedUnits: fetchData?.detectedUnits ?? item.detectedUnits,
-                    ocrStatus: fetchData?.ocrStatus ?? item.ocrStatus,
-                    rowCount: fetchData?.rowCount ?? item.rowCount,
-                  }
-                : item
-            )
-          );
-
-          await analyzeDoc({ ...doc, content, type: docType });
-        } catch (err) {
-          const recovered = recoverContentFromSources(
-            doc.prefetchedText,
-            doc.summary,
-            doc.title
-          );
-
-          if (recovered) {
-            setDocuments((prev) =>
-              prev.map((item) =>
-                item.id === doc.id ? { ...item, content: recovered } : item
-              )
-            );
-            await analyzeDoc({ ...doc, content: recovered });
-            toast(`Used cached preview for "${doc.title}"`, "info");
-            return;
-          }
-
-          const message = err instanceof Error ? err.message : "Fetch failed";
-          setDocuments((prev) =>
-            prev.map((item) =>
-              item.id === doc.id ? { ...item, status: "error" as const, error: message } : item
-            )
-          );
-          toast(message.length > 120 ? `${message.slice(0, 117)}…` : message, "error");
-        }
-        return;
-      }
-
-      if (doc.content) void analyzeDoc(doc);
-    },
-    [analyzeDoc, toast]
-  );
-
-  function bulkRetry(docs: MechDocument[]) {
-    for (const doc of docs) void retryDoc(doc);
-    toast(`Retrying ${docs.length} doc${docs.length !== 1 ? "s" : ""}`, "info");
-  }
-
-  const readyCount = documents.filter((doc) => doc.status === "ready").length;
-  const processingCount = documents.filter((doc) => doc.status === "processing").length;
-
-  if (!hydrated) {
+  if (!library.hydrated) {
     return (
       <main className="flex min-h-screen items-center justify-center bg-slate-50">
         <Spinner className="h-6 w-6 text-mech-600" />
@@ -251,11 +25,12 @@ export default function LibrariesPage() {
   return (
     <main className="min-h-screen bg-slate-50">
       <AppHeader
-        readyCount={readyCount}
-        processingCount={processingCount}
-        totalCount={documents.length}
-        onExport={() => setExportDocs(documents)}
-        onClearAll={() => setShowClearConfirm(true)}
+        maxWidth="6xl"
+        readyCount={library.readyCount}
+        processingCount={library.processingCount}
+        totalCount={library.documents.length}
+        onExport={() => library.openExport(library.documents)}
+        onClearAll={() => library.setShowClearConfirm(true)}
       />
 
       <div className="mx-auto max-w-6xl px-4 py-6 sm:px-6">
@@ -275,47 +50,64 @@ export default function LibrariesPage() {
         </div>
 
         <DocLibrary
-          documents={documents}
-          onRemove={removeDoc}
-          onSelect={selectDoc}
-          onRetry={retryDoc}
-          onExport={(doc) => setExportDocs([doc])}
-          onBulkExport={setExportDocs}
-          onBulkDelete={bulkDelete}
-          onBulkRetry={bulkRetry}
+          variant="libraries"
+          documents={library.documents}
+          onRemove={library.requestRemoveDoc}
+          onSelect={library.selectDoc}
+          onRetry={library.retryDoc}
+          onExport={(doc) => library.openExport([doc])}
+          onBulkExport={library.openExport}
+          onBulkDelete={library.requestBulkDelete}
+          onBulkRetry={library.bulkRetry}
         />
       </div>
 
-      {exportDocs && (
+      {library.exportDocs && (
         <ExportModal
-          documents={exportDocs}
-          title={exportDocs.length === 1 ? "Export document" : "Export for RAG"}
-          onClose={() => setExportDocs(null)}
+          documents={library.exportDocs}
+          title={library.exportDocs.length === 1 ? "Export document" : "Export for RAG"}
+          onClose={() => library.setExportDocs(null)}
           onExported={() => {
-            const count = exportDocs.filter((doc) => doc.status === "ready").length;
+            const count = library.exportDocs?.length ?? 0;
             toast(`Exported ${count} doc${count !== 1 ? "s" : ""}`, "success");
           }}
         />
       )}
 
       <ConfirmDialog
-        open={showClearConfirm}
+        open={library.showClearConfirm}
         title="Clear all documents?"
-        description={`Remove all ${documents.length} documents from your library.`}
+        description={`Remove all ${library.documents.length} documents from your library.`}
         confirmLabel="Clear"
         variant="danger"
         onConfirm={() => {
-          setDocuments([]);
-          setSelectedDoc(null);
-          setShowClearConfirm(false);
+          library.setDocuments([]);
+          library.setSelectedDoc(null);
+          library.setShowClearConfirm(false);
         }}
-        onCancel={() => setShowClearConfirm(false)}
+        onCancel={() => library.setShowClearConfirm(false)}
+      />
+
+      <ConfirmDialog
+        open={Boolean(library.pendingDeleteIds?.length)}
+        title={
+          (library.pendingDeleteIds?.length ?? 0) > 1
+            ? `Delete ${library.pendingDeleteIds?.length} documents?`
+            : "Delete document?"
+        }
+        description="This cannot be undone."
+        confirmLabel="Delete"
+        variant="danger"
+        onConfirm={library.confirmDelete}
+        onCancel={() => library.setPendingDeleteIds(null)}
       />
 
       <DocDrawer
-        doc={selectedDoc}
-        searchQuery={drawerSearchQuery}
-        onClose={() => setSelectedDoc(null)}
+        doc={library.selectedDoc}
+        searchQuery={library.drawerSearchQuery}
+        onClose={() => library.setSelectedDoc(null)}
+        onRetry={library.retryDoc}
+        onExport={(doc) => library.openExport([doc])}
       />
     </main>
   );

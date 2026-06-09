@@ -123,7 +123,7 @@ export default function DocCard({
             e.stopPropagation();
             onRemove(doc.id);
           }}
-          className="rounded-md px-1.5 py-0.5 text-lg leading-none text-slate-300 opacity-0 transition group-hover:opacity-100 hover:bg-red-50 hover:text-red-600 focus:opacity-100"
+          className="rounded-md px-1.5 py-0.5 text-lg leading-none text-slate-400 opacity-100 transition hover:bg-red-50 hover:text-red-600 focus:opacity-100 sm:opacity-0 sm:group-hover:opacity-100"
           aria-label="Remove"
         >
           ×
@@ -213,19 +213,19 @@ export default function DocCard({
                   e.stopPropagation();
                   onExport?.();
                 }}
-                className="font-medium text-slate-500 opacity-0 transition group-hover:opacity-100 hover:text-mech-700 focus:opacity-100"
+                className="font-medium text-slate-500 opacity-100 transition hover:text-mech-700 focus:opacity-100 sm:opacity-0 sm:group-hover:opacity-100"
               >
                 Export
               </button>
             )}
-            <span className="font-medium text-mech-600 opacity-0 transition group-hover:opacity-100">
+            <span className="font-medium text-mech-600 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 sm:transition sm:group-hover:opacity-100">
               Open
             </span>
           </div>
         )}
       </div>
 
-      <div className="pointer-events-none absolute left-3 right-3 top-12 z-20 hidden rounded-xl border border-slate-200 bg-white p-3 text-left shadow-xl group-hover:block">
+      <div className="pointer-events-none absolute left-3 right-3 top-12 z-20 hidden rounded-xl border border-slate-200 bg-white p-3 text-left shadow-xl sm:group-hover:block">
         <div className="mb-2 flex items-center justify-between gap-2">
           <p className="truncate text-xs font-semibold uppercase tracking-wide text-slate-400">
             File preview

@@ -2,11 +2,13 @@
 
 import { useDeferredValue, useEffect, useMemo, useState } from "react";
 import DocCard from "@/components/DocCard";
+import { Spinner } from "@/components/ui/Icons";
 import { DOC_TYPES, docTypeLabel } from "@/lib/file-types";
 import type { DocSource, DocStatus, DocType, MechDocument } from "@/types";
 
 interface DocLibraryProps {
   documents: MechDocument[];
+  variant?: "home" | "libraries";
   onRemove: (id: string) => void;
   onSelect: (doc: MechDocument, searchQuery: string) => void;
   onRetry: (doc: MechDocument) => void;
@@ -38,6 +40,7 @@ function cosineSimilarity(a: number[] | undefined, b: number[] | null): number {
 
 export default function DocLibrary({
   documents,
+  variant = "home",
   onRemove,
   onSelect,
   onRetry,
@@ -60,6 +63,7 @@ export default function DocLibrary({
   const [page, setPage] = useState(1);
   const [selectionMode, setSelectionMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [semanticLoading, setSemanticLoading] = useState(false);
   const deferredSearch = useDeferredValue(search);
 
   useEffect(() => {
@@ -67,10 +71,12 @@ export default function DocLibrary({
     if (searchMode !== "semantic" || !q) {
       setQueryEmbedding(null);
       setSemanticError(null);
+      setSemanticLoading(false);
       return;
     }
 
     const controller = new AbortController();
+    setSemanticLoading(true);
     const timeout = window.setTimeout(() => {
       void fetch("/api/embed", {
         method: "POST",
@@ -88,12 +94,14 @@ export default function DocLibrary({
           if (err instanceof DOMException && err.name === "AbortError") return;
           setQueryEmbedding(null);
           setSemanticError(err instanceof Error ? err.message : "Semantic search failed");
-        });
+        })
+        .finally(() => setSemanticLoading(false));
     }, 350);
 
     return () => {
       window.clearTimeout(timeout);
       controller.abort();
+      setSemanticLoading(false);
     };
   }, [deferredSearch, searchMode]);
 
@@ -104,6 +112,11 @@ export default function DocLibrary({
   );
   const tags = useMemo(
     () => Array.from(new Set(documents.flatMap((doc) => doc.tags ?? []))).sort(),
+    [documents]
+  );
+
+  const docsWithoutEmbeddings = useMemo(
+    () => documents.filter((doc) => doc.status === "ready" && !doc.embedding).length,
     [documents]
   );
 
@@ -122,7 +135,10 @@ export default function DocLibrary({
         if (tagFilter !== "all" && !(d.tags ?? []).includes(tagFilter)) return false;
         if (maxAgeMs && now - new Date(d.addedAt).getTime() > maxAgeMs) return false;
         if (!q) return true;
-        if (searchMode === "semantic") return Boolean(d.embedding && queryEmbedding);
+        if (searchMode === "semantic") {
+          if (semanticLoading || !queryEmbedding) return false;
+          return Boolean(d.embedding);
+        }
         const searchableText = [
           d.title,
           d.summary,
@@ -159,6 +175,7 @@ export default function DocLibrary({
     dateFilter,
     searchMode,
     queryEmbedding,
+    semanticLoading,
     sortBy,
   ]);
 
@@ -212,7 +229,9 @@ export default function DocLibrary({
       <div className="mt-8 rounded-lg border border-dashed border-slate-300 bg-white px-6 py-10 text-center">
         <p className="text-sm font-medium text-slate-700">No documents yet</p>
         <p className="mt-1 text-sm text-slate-500">
-          Use Web Sweep to find documents or Upload to add local files.
+          {variant === "libraries"
+            ? "Go to Add documents to sweep the web or upload files."
+            : "Use Web Sweep to find documents or Upload to add local files."}
         </p>
       </div>
     );
@@ -317,7 +336,6 @@ export default function DocLibrary({
           className="select-base"
         >
           <option value="all">All status</option>
-          <option value="pending">Pending</option>
           <option value="ready">Ready</option>
           <option value="processing">Processing</option>
           <option value="error">Error</option>
@@ -345,6 +363,13 @@ export default function DocLibrary({
           <option value="type">Type</option>
         </select>
       </div>
+
+      {semanticLoading && deferredSearch.trim() && searchMode === "semantic" && (
+        <p className="mb-4 flex items-center gap-2 rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-sm text-sky-700">
+          <Spinner className="h-4 w-4" />
+          Building semantic query…
+        </p>
+      )}
 
       {semanticError && (
         <p className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-700">
@@ -398,9 +423,18 @@ export default function DocLibrary({
         </select>
       </div>
 
+      {docsWithoutEmbeddings > 0 && searchMode === "semantic" && (
+        <p className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-700">
+          {docsWithoutEmbeddings} ready document{docsWithoutEmbeddings !== 1 ? "s" : ""} lack
+          embeddings — re-analyze or retry to enable semantic search.
+        </p>
+      )}
+
       {filtered.length === 0 ? (
         <p className="rounded-lg bg-slate-100 py-8 text-center text-sm text-slate-500">
-          No documents match your search.
+          {semanticLoading && deferredSearch.trim() && searchMode === "semantic"
+            ? "Searching by meaning…"
+            : "No documents match your filters."}
         </p>
       ) : (
         <>
