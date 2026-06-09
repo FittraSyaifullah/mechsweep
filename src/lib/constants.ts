@@ -27,7 +27,10 @@ export const MAX_EXA_EXCLUDE_DOMAINS = 1200;
 export const EXA_TOTAL_TEXT_BUDGET = 120_000;
 
 /** Max prefetched text returned per sweep result in API responses. */
-export const SWEEP_PREFETCH_MAX_CHARS = 2_500;
+export const SWEEP_PREFETCH_MAX_CHARS = 1_200;
+
+/** Max exclude URLs sent per sweep API request (prevents oversized/truncated JSON bodies). */
+export const SWEEP_MAX_EXCLUDE_URLS = 600;
 
 /** Default unique results collected in one full sweep (batched Exa calls). */
 export const DEFAULT_SWEEP_SESSION_MAX = 500;

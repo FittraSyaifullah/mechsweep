@@ -5,7 +5,9 @@ import {
   describeExaSearchProfile,
   resolveExaRequestTimeoutMs,
 } from "@/lib/exa-config";
+import { parseJsonText } from "@/lib/json-safe";
 import { resolveSweepMaxResults } from "@/lib/sweep-limits";
+import { sanitizeSweepResult } from "@/lib/sweep-sanitize";
 import type { SweepResult } from "@/types";
 
 interface ExaSearchResult {
@@ -87,16 +89,18 @@ export async function searchExa(
   const raw = await response.text();
   let data: { results?: ExaSearchResult[] };
   try {
-    data = JSON.parse(raw) as { results?: ExaSearchResult[] };
-  } catch {
-    throw new Error(`Exa API returned invalid JSON: ${raw.slice(0, 200)}`);
+    data = parseJsonText<{ results?: ExaSearchResult[] }>(raw, "Exa API response");
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : "Invalid JSON";
+    throw new Error(`Exa API returned invalid JSON: ${reason}`);
   }
 
   const excluded = new Set(excludeUrls);
 
   return (data.results ?? [])
     .map((result, index) => mapExaResult(result, index))
-    .filter((result): result is SweepResult => result !== null && !excluded.has(result.url));
+    .filter((result): result is SweepResult => result !== null && !excluded.has(result.url))
+    .map(sanitizeSweepResult);
 }
 
 export function exaSearchEnabled(): boolean {

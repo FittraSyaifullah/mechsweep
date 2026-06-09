@@ -1,6 +1,5 @@
 /** Thrown when an API response is not valid JSON or the request failed. */
-export class ApiResponseError extends Error {
-  constructor(
+export class ApiResponseError extends Error {  constructor(
     message: string,
     readonly status: number
   ) {
@@ -9,8 +8,9 @@ export class ApiResponseError extends Error {
   }
 }
 
-export async function fetchJson<T>(
-  input: RequestInfo | URL,
+import { parseJsonText } from "@/lib/json-safe";
+
+export async function fetchJson<T>(  input: RequestInfo | URL,
   init?: RequestInit
 ): Promise<{ response: Response; data: T }> {
   const response = await fetch(input, init);
@@ -24,12 +24,13 @@ export async function fetchJson<T>(
   }
 
   try {
-    return { response, data: JSON.parse(raw) as T };
-  } catch {
-    const preview = raw.replace(/\s+/g, " ").trim().slice(0, 160);
+    return { response, data: parseJsonText<T>(raw, "Server response") };
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : "Invalid JSON";
+    const preview = raw.replace(/\s+/g, " ").trim().slice(0, 120);
     throw new ApiResponseError(
       response.ok
-        ? `Server returned invalid JSON: ${preview}`
+        ? `${detail}${preview ? ` — ${preview}` : ""}`
         : `Request failed (${response.status}): ${preview}`,
       response.status
     );

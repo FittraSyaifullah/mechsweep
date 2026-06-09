@@ -3,7 +3,9 @@ import { callChatAI } from "@/lib/ai";
 import { exaSearchEnabled, searchExa, describeExaSearchProfile } from "@/lib/exa";
 import { resolveEffectiveExaBatchSize } from "@/lib/exa-config";
 import { fetchRemoteUrl } from "@/lib/fetch-document";
-import { SWEEP_PREFETCH_MAX_CHARS } from "@/lib/constants";
+import { readJsonBody } from "@/lib/json-safe";
+import { SWEEP_MAX_EXCLUDE_URLS } from "@/lib/constants";
+import { sanitizeSweepResults } from "@/lib/sweep-sanitize";
 import { resolveSweepRequestLimit } from "@/lib/sweep-limits";
 import {
   detectDocTypeFromContentType,
@@ -175,26 +177,19 @@ async function searchWithMistral(
 }
 
 function compactSweepResults(results: SweepResult[]): SweepResult[] {
-  return results.map((result) => {
-    if (!result.prefetchedText || result.prefetchedText.length <= SWEEP_PREFETCH_MAX_CHARS) {
-      return result;
-    }
-    return {
-      ...result,
-      prefetchedText: result.prefetchedText.slice(0, SWEEP_PREFETCH_MAX_CHARS),
-    };
-  });
+  return sanitizeSweepResults(results);
 }
 
 export async function POST(request: NextRequest) {
   try {
-    const data = (await request.json()) as {
+    const data = await readJsonBody<{
       query?: string;
       excludeUrls?: string[];
       maxResults?: number;
-    };
+    }>(request, { maxBytes: 512_000, label: "Sweep request" });
+
     const query = data.query?.trim() || "Find mechanical engineering documents";
-    const excluded = (data.excludeUrls ?? []).slice(0, 1200);
+    const excluded = (data.excludeUrls ?? []).slice(0, SWEEP_MAX_EXCLUDE_URLS);
     const maxResults =
       data.maxResults !== undefined
         ? resolveSweepRequestLimit(data.maxResults)
@@ -226,6 +221,8 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ results, provider: "mistral", maxResults });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Sweep failed";
-    return NextResponse.json({ error: message }, { status: 500 });
+    const status =
+      message.includes("too large") || message.includes("JSON parse failed") ? 413 : 500;
+    return NextResponse.json({ error: message }, { status });
   }
 }

@@ -1,10 +1,31 @@
 import {
   DEFAULT_SWEEP_SESSION_MAX,
   SWEEP_BATCH_SIZE,
+  SWEEP_MAX_EXCLUDE_URLS,
 } from "@/lib/constants";
 import { fetchJson } from "@/lib/fetch-json";
 import { resolveSweepSessionMax, sweepBatchCount } from "@/lib/sweep-limits";
 import type { SweepResult } from "@/types";
+
+/** Cap exclude URLs so sweep POST bodies stay valid JSON (library can hold thousands). */
+export function buildSweepExcludeUrls(
+  libraryUrls: string[],
+  sweepUrls: string[],
+  max = SWEEP_MAX_EXCLUDE_URLS
+): string[] {
+  const seen = new Set<string>();
+  const merged: string[] = [];
+
+  for (const url of [...sweepUrls, ...libraryUrls]) {
+    const trimmed = url.trim();
+    if (!trimmed || seen.has(trimmed)) continue;
+    seen.add(trimmed);
+    merged.push(trimmed);
+    if (merged.length >= max) break;
+  }
+
+  return merged;
+}
 
 export interface SweepBatchResponse {
   results: SweepResult[];
@@ -90,10 +111,7 @@ export async function runBatchedSweep(options: BatchedSweepOptions): Promise<Bat
   for (let batchIndex = 0; batchIndex < batchTotal; batchIndex++) {
     onProgress?.(batchIndex + 1, batchTotal);
 
-    const batchExclude = [
-      ...excludeUrls,
-      ...merged.map((result) => result.url),
-    ];
+    const batchExclude = buildSweepExcludeUrls(excludeUrls, merged.map((result) => result.url));
 
     const batch = await fetchSweepBatch(query, batchExclude, batchSize);
     if (!batch.ok) {
