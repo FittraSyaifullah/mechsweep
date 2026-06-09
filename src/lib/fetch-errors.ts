@@ -42,6 +42,13 @@ export function fetchExceptionMessage(error: unknown, url?: string): {
   }
 
   if (error instanceof TypeError) {
+    const detail = error.message.toLowerCase();
+    if (detail.includes("certificate") || detail.includes("ssl") || detail.includes("tls")) {
+      return {
+        message: `Secure connection failed${url ? `: ${url}` : ""}. The source may have an invalid certificate.`,
+        status: 502,
+      };
+    }
     return {
       message: `URL could not be reached${url ? `: ${url}` : ""}. Check that it is public and online.`,
       status: 502,
@@ -54,9 +61,13 @@ export function fetchExceptionMessage(error: unknown, url?: string): {
   };
 }
 
-export function isSupportedContentType(contentType: string | null): boolean {
+export function isSupportedContentType(contentType: string | null, url?: string): boolean {
   if (!contentType) return true;
   const lower = contentType.toLowerCase();
+  if (lower.includes("application/octet-stream")) {
+    if (!url) return true;
+    return /\.(pdf|csv|txt)(\?|#|$)/i.test(url);
+  }
   return (
     lower.includes("application/pdf") ||
     lower.includes("text/csv") ||

@@ -252,9 +252,12 @@ export default function Home() {
         void embedDoc(id, content, result.title);
       } catch (err) {
         const message = err instanceof Error ? err.message : "Fetch failed";
-        setDocuments((prev) => prev.filter((d) => d.id !== id));
+        setDocuments((prev) =>
+          prev.map((d) =>
+            d.id === id ? { ...d, status: "error" as const, error: message } : d
+          )
+        );
         toast(`Fetch failed: ${result.title}`, "error");
-        console.warn(message);
       }
     },
     [analyzeDoc, documents, embedDoc, toast]

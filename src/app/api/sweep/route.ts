@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { callChatAI } from "@/lib/ai";
+import { fetchRemoteUrl } from "@/lib/fetch-document";
 import {
   detectDocTypeFromContentType,
   detectDocTypeFromUrl,
@@ -54,18 +55,10 @@ async function validateSweepResult(result: SweepResult): Promise<SweepResult | n
   if (!url) return null;
 
   try {
-    const response = await fetch(url, {
-      method: "GET",
-      redirect: "follow",
-      headers: {
-        Accept:
-          "application/pdf,text/csv,text/plain,text/html,application/xhtml+xml,*/*;q=0.8",
-        "Accept-Language": "en-US,en;q=0.9",
-        Range: "bytes=0-4095",
-        "User-Agent":
-          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36 MechSweep/1.0",
-      },
-      signal: AbortSignal.timeout(VALIDATE_TIMEOUT_MS),
+    const response = await fetchRemoteUrl(url, {
+      timeoutMs: VALIDATE_TIMEOUT_MS,
+      rangeEnd: 4095,
+      retries: 1,
     });
 
     if (!response.ok && response.status !== 206) return null;

@@ -16,6 +16,12 @@ import {
   extractTablesFromText,
 } from "@/lib/processing";
 import {
+  DEFAULT_FETCH_TIMEOUT_MS,
+  fetchRemoteUrl,
+  inferContentKind,
+  isPdfBuffer,
+} from "@/lib/fetch-document";
+import {
   failedStatusMessage,
   fetchExceptionMessage,
   isSupportedContentType,
@@ -25,26 +31,12 @@ import {
 } from "@/lib/fetch-errors";
 import type { DocType } from "@/types";
 
-const FETCH_TIMEOUT_MS = 45000;
+export const maxDuration = 60;
 
 function normalizeUrl(input: string): string {
   const trimmed = input.trim();
   const withProtocol = /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
   return new URL(withProtocol).toString();
-}
-
-async function fetchDocument(url: string): Promise<Response> {
-  return fetch(url, {
-    redirect: "follow",
-    headers: {
-      Accept:
-        "application/pdf,text/csv,text/plain,text/html,application/xhtml+xml,*/*;q=0.8",
-      "Accept-Language": "en-US,en;q=0.9",
-      "User-Agent":
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36 MechSweep/1.0",
-    },
-    signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
-  });
 }
 
 function getResponseSize(response: Response): number | null {
@@ -72,9 +64,9 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const response = await fetchDocument(url);
+    const response = await fetchRemoteUrl(url, { timeoutMs: DEFAULT_FETCH_TIMEOUT_MS });
 
-    if (!response.ok) {
+    if (!response.ok && response.status !== 206) {
       return NextResponse.json(
         { error: failedStatusMessage(response.status, response.statusText, url) },
         { status: response.status === 404 ? 404 : 502 }
@@ -82,7 +74,7 @@ export async function POST(request: NextRequest) {
     }
 
     const contentType = response.headers.get("content-type");
-    if (!isSupportedContentType(contentType)) {
+    if (!isSupportedContentType(contentType, url)) {
       return NextResponse.json(
         { error: unsupportedContentTypeMessage(contentType, url) },
         { status: 415 }
@@ -90,7 +82,6 @@ export async function POST(request: NextRequest) {
     }
 
     const fallbackType = body.type ?? detectDocTypeFromUrl(url);
-    const type = detectDocTypeFromContentType(contentType, fallbackType);
     const responseSize = getResponseSize(response);
 
     if (responseSize && responseSize > MAX_FETCH_BYTES) {
@@ -100,21 +91,29 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    if (type === "pdf") {
-      const buffer = Buffer.from(await response.arrayBuffer());
-      if (buffer.length > MAX_FETCH_BYTES) {
-        return NextResponse.json(
-          { error: oversizedDocumentMessage(buffer.length) },
-          { status: 413 }
-        );
-      }
+    const buffer = Buffer.from(await response.arrayBuffer());
+    if (buffer.length > MAX_FETCH_BYTES) {
+      return NextResponse.json(
+        { error: oversizedDocumentMessage(buffer.length) },
+        { status: 413 }
+      );
+    }
 
+    const kind = inferContentKind(contentType, url, buffer);
+    const type =
+      kind === "pdf"
+        ? "pdf"
+        : kind === "csv"
+          ? "csv"
+          : detectDocTypeFromContentType(contentType, fallbackType);
+
+    if (type === "pdf" || isPdfBuffer(buffer)) {
       const data = await parsePdfWithPages(buffer);
       const tables = extractTablesFromText(data.text);
 
       return NextResponse.json({
         text: data.text,
-        type,
+        type: "pdf" as const,
         sizeBytes: buffer.length,
         pageCount: data.pageCount,
         pages: data.pages,
@@ -125,20 +124,14 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    const text = await response.text();
-    const sizeBytes = new TextEncoder().encode(text).length;
-    if (sizeBytes > MAX_FETCH_BYTES) {
-      return NextResponse.json(
-        { error: oversizedDocumentMessage(sizeBytes) },
-        { status: 413 }
-      );
-    }
+    const text = buffer.toString("utf8");
+    const sizeBytes = buffer.length;
 
-    if (type === "csv") {
+    if (type === "csv" || kind === "csv") {
       const { text: csvText, rowCount } = extractTextFromCsv(text);
       return NextResponse.json({
         text: csvText,
-        type,
+        type: "csv" as const,
         sizeBytes,
         rowCount,
         tables: extractCsvTables(text),
@@ -148,7 +141,7 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    const isHtml = contentType?.toLowerCase().includes("html");
+    const isHtml = kind === "html" || contentType?.toLowerCase().includes("html");
     const extractedText = isHtml ? extractTextFromHtml(text) : extractTextFromTxt(text);
 
     if (!extractedText) {
