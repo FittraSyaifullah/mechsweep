@@ -1,6 +1,7 @@
 import { fetchJson, ApiResponseError } from "@/lib/fetch-json";
 import { buildCompactSweepPayload } from "@/lib/sweep-payload";
 import { SWEEP_BATCH_SIZE, SWEEP_MAX_EXCLUDE_URLS } from "@/lib/constants";
+import { dedupeSweepResultsByUrl } from "@/lib/duplicates";
 import { resolveSweepSessionMax, sweepBatchCount } from "@/lib/sweep-limits";
 import type { SweepResult } from "@/types";
 
@@ -46,17 +47,7 @@ export function mergeSweepResults(
   existing: SweepResult[],
   incoming: SweepResult[]
 ): SweepResult[] {
-  const seen = new Set(existing.map((result) => result.url));
-  const merged = [...existing];
-
-  for (const result of incoming) {
-    if (!seen.has(result.url)) {
-      merged.push(result);
-      seen.add(result.url);
-    }
-  }
-
-  return merged;
+  return dedupeSweepResultsByUrl([...existing, ...incoming]);
 }
 
 const CLIENT_SWEEP_TIMEOUT_MS = 120_000;

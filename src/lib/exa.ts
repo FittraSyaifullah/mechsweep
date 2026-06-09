@@ -6,6 +6,7 @@ import {
   resolveExaRequestTimeoutMs,
 } from "@/lib/exa-config";
 import { resolveExaBaseUrl } from "@/lib/env-sanitize";
+import { buildNormalizedUrlSet, isDocumentUrlKnown } from "@/lib/duplicates";
 import { parseJsonText } from "@/lib/json-safe";
 import { requireExaApiKey } from "@/lib/search-provider";
 import { resolveSweepMaxResults } from "@/lib/sweep-limits";
@@ -95,11 +96,15 @@ export async function searchExa(
     throw new Error(`Exa API returned invalid JSON: ${reason}`);
   }
 
-  const excluded = new Set(excludeUrls);
+  const excluded = buildNormalizedUrlSet(excludeUrls);
 
   return (data.results ?? [])
     .map((result, index) => mapExaResult(result, index))
-    .filter((result): result is SweepResult => result !== null && !excluded.has(result.url))
+    .filter(
+      (result): result is SweepResult =>
+        result !== null &&
+        !isDocumentUrlKnown(result.url, excluded)
+    )
     .map(sanitizeSweepResult);
 }
 

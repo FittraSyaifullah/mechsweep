@@ -1,7 +1,9 @@
 "use client";
 
 import Link from "next/link";
+import { useState } from "react";
 import AppHeader from "@/components/AppHeader";
+import CategoryInsights from "@/components/CategoryInsights";
 import ConfirmDialog from "@/components/ui/ConfirmDialog";
 import DocDrawer from "@/components/DocDrawer";
 import DocLibrary from "@/components/DocLibrary";
@@ -10,9 +12,11 @@ import { Spinner } from "@/components/ui/Icons";
 import { useDocumentLibrary } from "@/hooks/useDocumentLibrary";
 import { MAX_LIBRARY_DOCUMENTS } from "@/lib/constants";
 import { useToast } from "@/components/Toast";
+import type { MeCategory } from "@/types";
 
 export default function LibrariesPage() {
   const { toast } = useToast();
+  const [domainFilter, setDomainFilter] = useState<MeCategory | null>(null);
   const library = useDocumentLibrary({ toastOnAnalyzeSuccess: false });
 
   if (!library.hydrated) {
@@ -51,9 +55,17 @@ export default function LibrariesPage() {
           </Link>
         </div>
 
+        <CategoryInsights
+          documents={library.documents}
+          selectedCategory={domainFilter}
+          onCategorySelect={setDomainFilter}
+        />
+
         <DocLibrary
           variant="libraries"
           documents={library.documents}
+          domainFilter={domainFilter}
+          onClearDomainFilter={() => setDomainFilter(null)}
           onRemove={library.requestRemoveDoc}
           onSelect={library.selectDoc}
           onRetry={library.retryDoc}

@@ -1,15 +1,18 @@
 "use client";
 
-import { useState } from "react";
-import {
-  DEFAULT_SWEEP_SESSION_MAX,
-  SWEEP_BATCH_SIZE,
-} from "@/lib/constants";
+import { useMemo, useState } from "react";
+import { SWEEP_BATCH_SIZE } from "@/lib/constants";
 import { runBatchedSweep } from "@/lib/sweep-client";
+import { dedupeSweepResultsByUrl, isDocumentUrlKnown } from "@/lib/duplicates";
 import { resolveSweepSessionMax, sweepBatchCount } from "@/lib/sweep-limits";
+import { formatUserError, relevancePercent } from "@/lib/user-messages";
 import type { SweepResult } from "@/types";
+import Alert from "@/components/ui/Alert";
 import Button from "@/components/ui/Button";
-import { Spinner } from "@/components/ui/Icons";
+import EmptyState from "@/components/ui/EmptyState";
+import { GlobeIcon, SearchIcon, Spinner } from "@/components/ui/Icons";
+import ProgressBar from "@/components/ui/ProgressBar";
+import { useToast } from "@/components/Toast";
 
 const SUGGESTIONS = [
   "Heat transfer fundamentals",
@@ -33,27 +36,44 @@ function providerLabel(provider: string | null): string {
 }
 
 export default function SweepPanel({ onAdd, addedUrls }: SweepPanelProps) {
+  const { toast } = useToast();
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<SweepResult[]>([]);
   const [loading, setLoading] = useState(false);
   const [adding, setAdding] = useState(false);
   const [addProgress, setAddProgress] = useState<string | null>(null);
-  const [sweepProgress, setSweepProgress] = useState<string | null>(null);
+  const [batchProgress, setBatchProgress] = useState<{ current: number; total: number } | null>(
+    null
+  );
   const [error, setError] = useState<string | null>(null);
   const [hasSearched, setHasSearched] = useState(false);
   const [provider, setProvider] = useState<string | null>(null);
+  const [lastQuery, setLastQuery] = useState("");
+
+  const sessionMax = resolveSweepSessionMax();
+  const plannedBatches = sweepBatchCount(sessionMax, SWEEP_BATCH_SIZE);
+  const pendingCount = results.filter((r) => !isDocumentUrlKnown(r.url, addedUrls)).length;
+  const userError = useMemo(
+    () => (error ? formatUserError(error) : null),
+    [error]
+  );
 
   async function handleSweep(searchQuery?: string, append = false) {
     const q = (searchQuery ?? query).trim();
+    if (!q) {
+      toast("Enter a search topic first", "info");
+      return;
+    }
     if (searchQuery) setQuery(searchQuery);
 
     setLoading(true);
     setError(null);
-    setSweepProgress(null);
+    setBatchProgress(null);
     setHasSearched(true);
+    setLastQuery(q);
+    const resultCountBefore = append ? results.length : 0;
 
     try {
-      const sessionMax = resolveSweepSessionMax();
       const outcome = await runBatchedSweep({
         query: q,
         excludeUrls: Array.from(addedUrls),
@@ -62,32 +82,50 @@ export default function SweepPanel({ onAdd, addedUrls }: SweepPanelProps) {
         singleBatch: append,
         existingResults: append ? results : [],
         onProgress: (batchIndex, total) => {
-          setSweepProgress(
-            total > 1 ? `Batch ${batchIndex} of ${total}…` : "Searching…"
-          );
+          setBatchProgress({ current: batchIndex, total });
         },
       });
 
       setProvider(outcome.provider ?? "exa");
-      setResults(outcome.results);
+      setResults(dedupeSweepResultsByUrl(outcome.results));
+
+      if (outcome.results.length === 0) {
+        toast("No new documents found — try different keywords", "info");
+      } else if (append) {
+        const added = outcome.results.length - resultCountBefore;
+        if (added > 0) {
+          toast(`Found ${added} more document${added !== 1 ? "s" : ""}`, "success");
+        }
+      } else {
+        toast(
+          `Found ${outcome.results.length} document${outcome.results.length !== 1 ? "s" : ""}`,
+          "success"
+        );
+      }
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Sweep failed");
+      const message = err instanceof Error ? err.message : "Sweep failed";
+      setError(message);
       if (!append) setResults([]);
     } finally {
       setLoading(false);
-      setSweepProgress(null);
+      setBatchProgress(null);
     }
   }
 
   async function handleAddAll() {
-    const pending = results.filter((r) => !addedUrls.has(r.url));
+    const pending = results.filter((r) => !isDocumentUrlKnown(r.url, addedUrls));
     if (pending.length === 0 || adding) return;
 
     setAdding(true);
+    let added = 0;
     try {
       for (let i = 0; i < pending.length; i++) {
-        setAddProgress(`Adding ${i + 1}/${pending.length}…`);
+        setAddProgress(`Adding ${i + 1} of ${pending.length}…`);
         await onAdd(pending[i]);
+        added += 1;
+      }
+      if (added > 0) {
+        toast(`Added ${added} document${added !== 1 ? "s" : ""} to library`, "success");
       }
     } finally {
       setAdding(false);
@@ -96,28 +134,30 @@ export default function SweepPanel({ onAdd, addedUrls }: SweepPanelProps) {
   }
 
   const busy = loading || adding;
-  const sessionMax = resolveSweepSessionMax();
-  const plannedBatches = sweepBatchCount(sessionMax, SWEEP_BATCH_SIZE);
 
   return (
-    <div className="space-y-4">
-      <p className="text-sm text-slate-600">
-        Exa-powered sweep (primary web search) collects up to {sessionMax} unique documents
-        per run ({plannedBatches} batches of {SWEEP_BATCH_SIZE}). Mistral is used for
-        document analysis only. Use Sweep more to append another batch.
-      </p>
-
+    <div className="space-y-5">
       <div className="flex flex-col gap-2 sm:flex-row">
-        <input
-          type="text"
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && !busy && handleSweep()}
-          placeholder="e.g. heat transfer, machine design…"
-          disabled={busy}
-          className="input-base flex-1"
-        />
-        <Button onClick={() => handleSweep()} loading={loading} disabled={adding} className="sm:shrink-0">
+        <div className="relative flex-1">
+          <SearchIcon className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+          <input
+            type="search"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && !busy && void handleSweep()}
+            placeholder="e.g. heat transfer, FEA, machine design…"
+            disabled={busy}
+            aria-label="Search topic"
+            className="input-base pl-9"
+          />
+        </div>
+        <Button
+          onClick={() => void handleSweep()}
+          loading={loading}
+          disabled={adding}
+          icon={!loading ? <SearchIcon className="h-4 w-4" /> : undefined}
+          className="sm:shrink-0"
+        >
           {loading ? "Searching…" : "Sweep"}
         </Button>
       </div>
@@ -127,98 +167,174 @@ export default function SweepPanel({ onAdd, addedUrls }: SweepPanelProps) {
           <button
             key={s}
             type="button"
-            onClick={() => handleSweep(s)}
+            onClick={() => void handleSweep(s)}
             disabled={busy}
-            className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs text-slate-600 hover:border-mech-300 hover:text-mech-700 disabled:opacity-50"
+            className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs text-slate-600 transition hover:border-mech-300 hover:bg-mech-50 hover:text-mech-700 disabled:opacity-50"
           >
             {s}
           </button>
         ))}
       </div>
 
-      {error && (
-        <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
-          {error}
-        </div>
+      <details className="rounded-lg border border-slate-100 bg-slate-50/80 px-3 py-2 text-xs text-slate-500">
+        <summary className="cursor-pointer select-none font-medium text-slate-600">
+          How sweeps work
+        </summary>
+        <p className="mt-2 leading-relaxed">
+          Powered by Exa — collects up to {sessionMax} unique documents per run ({plannedBatches}{" "}
+          batches of {SWEEP_BATCH_SIZE}). Documents you add are excluded from future sweeps. Use{" "}
+          <strong className="font-medium text-slate-700">Sweep more</strong> to fetch another batch
+          without starting over.
+        </p>
+      </details>
+
+      {userError && (
+        <Alert
+          variant="error"
+          title={userError.title}
+          detail={userError.detail}
+          onRetry={
+            userError.retryable && lastQuery
+              ? () => void handleSweep(lastQuery, results.length > 0)
+              : undefined
+          }
+        />
       )}
 
       {addProgress && (
-        <div className="flex items-center gap-2 rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-sm text-sky-700">
-          <Spinner className="h-4 w-4" />
+        <div className="flex items-center gap-2 rounded-lg border border-sky-200 bg-sky-50 px-3 py-2.5 text-sm text-sky-800">
+          <Spinner className="h-4 w-4 shrink-0" />
           {addProgress}
         </div>
       )}
 
       {loading && (
-        <div className="flex items-center justify-center gap-2 py-8 text-sm text-slate-500">
-          <Spinner className="h-5 w-5 text-mech-600" />
-          {sweepProgress ?? "Searching for documents…"}
+        <div className="space-y-4 rounded-lg border border-slate-200 bg-slate-50/50 px-4 py-6">
+          <div className="flex items-center justify-center gap-2 text-sm text-slate-600">
+            <Spinner className="h-5 w-5 text-mech-600" />
+            {batchProgress && batchProgress.total > 1
+              ? `Batch ${batchProgress.current} of ${batchProgress.total}…`
+              : "Searching the web…"}
+          </div>
+          {batchProgress && batchProgress.total > 1 && (
+            <ProgressBar
+              value={batchProgress.current}
+              max={batchProgress.total}
+              label="Collecting results"
+            />
+          )}
+          <div className="space-y-2">
+            {[0, 1, 2].map((i) => (
+              <div key={i} className="animate-pulse rounded-lg bg-slate-200/70 h-16" />
+            ))}
+          </div>
         </div>
       )}
 
+      {!loading && !hasSearched && (
+        <EmptyState
+          icon={<GlobeIcon className="h-7 w-7" />}
+          title="Discover engineering documents"
+          description="Search for PDFs, datasheets, textbooks, standards, and CAD files across the web. Pick a suggestion or type your own topic."
+        />
+      )}
+
       {!loading && hasSearched && results.length === 0 && !error && (
-        <p className="py-6 text-center text-sm text-slate-500">
-          No results. Try a different query or suggestion.
-        </p>
+        <EmptyState
+          icon={<SearchIcon className="h-6 w-6" />}
+          title="No results found"
+          description="Try broader keywords, a different suggestion, or Sweep more if you've already collected results."
+          action={
+            lastQuery ? (
+              <Button variant="secondary" size="sm" onClick={() => void handleSweep(lastQuery)}>
+                Search again
+              </Button>
+            ) : undefined
+          }
+        />
       )}
 
       {!loading && results.length > 0 && (
-        <div className="space-y-2">
-          <div className="flex items-center justify-between">
-            <p className="text-xs font-medium text-slate-500">
-              {results.length} results
-              {provider ? ` · ${providerLabel(provider)}` : ""}
+        <div className="space-y-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <p className="text-sm text-slate-600">
+              <span className="font-semibold text-slate-900">{results.length}</span> results
+              {provider ? (
+                <span className="text-slate-400"> · {providerLabel(provider)}</span>
+              ) : null}
+              {pendingCount < results.length && (
+                <span className="text-slate-400">
+                  {" "}
+                  · {pendingCount} not yet in library
+                </span>
+              )}
             </p>
-            <div className="flex items-center gap-3">
-              <button
-                type="button"
-                onClick={() => handleSweep(undefined, true)}
+            <div className="flex items-center gap-2">
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => void handleSweep(undefined, true)}
                 disabled={busy}
-                className="text-xs font-medium text-mech-600 hover:underline disabled:text-slate-400"
               >
                 Sweep more
-              </button>
-              <button
-                type="button"
+              </Button>
+              <Button
+                variant="secondary"
+                size="sm"
                 onClick={() => void handleAddAll()}
-                disabled={busy || results.every((r) => addedUrls.has(r.url))}
-                className="text-xs font-medium text-mech-600 hover:underline disabled:text-slate-400"
+                disabled={busy || pendingCount === 0}
+                loading={adding}
               >
-                Add all
-              </button>
+                Add all{pendingCount > 0 ? ` (${pendingCount})` : ""}
+              </Button>
             </div>
           </div>
 
-          {results.map((result) => {
-            const added = addedUrls.has(result.url);
-            return (
-              <div
-                key={result.url}
-                className="flex items-start justify-between gap-3 rounded-lg border border-slate-200 bg-slate-50/50 px-4 py-3"
-              >
-                <div className="min-w-0">
-                  <p className="text-sm font-medium text-slate-900">{result.title}</p>
-                  <p className="mt-0.5 line-clamp-2 text-sm text-slate-600">
-                    {result.description}
-                  </p>
-                  <p className="mt-1 text-xs text-slate-400">
-                    {result.type.toUpperCase()}
-                    {result.category ? ` · ${result.category}` : ""}
-                  </p>
-                </div>
-                <Button
-                  variant={added ? "secondary" : "primary"}
-                  size="sm"
-                  onClick={() => void onAdd(result)}
-                  disabled={added || adding}
-                  loading={adding && !added}
-                  className="shrink-0"
+          <ul className="space-y-2" aria-label="Sweep results">
+            {results.map((result) => {
+              const added = isDocumentUrlKnown(result.url, addedUrls);
+              return (
+                <li
+                  key={result.url}
+                  className="flex items-start justify-between gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm transition hover:border-mech-200"
                 >
-                  {added ? "Added" : "Add"}
-                </Button>
-              </div>
-            );
-          })}
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <p className="text-sm font-medium text-slate-900">{result.title}</p>
+                      <span className="rounded-full bg-mech-50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-mech-700">
+                        {result.type}
+                      </span>
+                      <span className="text-[10px] font-medium text-slate-400">
+                        {relevancePercent(result.relevanceScore)} match
+                      </span>
+                    </div>
+                    <p className="mt-1 line-clamp-2 text-sm leading-relaxed text-slate-600">
+                      {result.description}
+                    </p>
+                    <a
+                      href={result.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      onClick={(e) => e.stopPropagation()}
+                      className="mt-1.5 inline-block max-w-full truncate text-xs text-mech-600 hover:underline"
+                    >
+                      {result.url}
+                    </a>
+                  </div>
+                  <Button
+                    variant={added ? "secondary" : "primary"}
+                    size="sm"
+                    onClick={() => void onAdd(result)}
+                    disabled={added || adding}
+                    loading={adding && !added}
+                    className="shrink-0"
+                  >
+                    {added ? "In library" : "Add"}
+                  </Button>
+                </li>
+              );
+            })}
+          </ul>
         </div>
       )}
     </div>

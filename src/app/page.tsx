@@ -2,33 +2,37 @@
 
 import { useState } from "react";
 import AppHeader from "@/components/AppHeader";
+import CategoryInsights from "@/components/CategoryInsights";
 import DocDrawer from "@/components/DocDrawer";
 import DocLibrary from "@/components/DocLibrary";
 import ExportModal from "@/components/ExportModal";
 import SweepPanel from "@/components/SweepPanel";
 import UploadZone from "@/components/UploadZone";
 import ConfirmDialog from "@/components/ui/ConfirmDialog";
-import { Spinner } from "@/components/ui/Icons";
+import { GlobeIcon, Spinner, UploadIcon } from "@/components/ui/Icons";
 import { useDocumentLibrary } from "@/hooks/useDocumentLibrary";
 import { MAX_LIBRARY_DOCUMENTS } from "@/lib/constants";
 import { useToast } from "@/components/Toast";
+import type { MeCategory } from "@/types";
 
 type Tab = "sweep" | "upload";
 
-const TABS: { id: Tab; label: string }[] = [
-  { id: "sweep", label: "Web Sweep" },
-  { id: "upload", label: "Upload" },
+const TABS: { id: Tab; label: string; icon: typeof GlobeIcon }[] = [
+  { id: "sweep", label: "Web Sweep", icon: GlobeIcon },
+  { id: "upload", label: "Upload", icon: UploadIcon },
 ];
 
 export default function Home() {
   const { toast } = useToast();
   const [tab, setTab] = useState<Tab>("sweep");
+  const [domainFilter, setDomainFilter] = useState<MeCategory | null>(null);
   const library = useDocumentLibrary({ filterEmptySweepErrors: true });
 
   if (!library.hydrated) {
     return (
-      <main className="flex min-h-screen items-center justify-center bg-slate-50">
-        <Spinner className="h-6 w-6 text-mech-600" />
+      <main className="flex min-h-screen flex-col items-center justify-center gap-3 bg-slate-50">
+        <Spinner className="h-7 w-7 text-mech-600" />
+        <p className="text-sm text-slate-500">Loading your library…</p>
       </main>
     );
   }
@@ -45,25 +49,29 @@ export default function Home() {
       />
 
       <div className="mx-auto max-w-3xl px-4 py-6 sm:px-6">
-        <nav className="mb-6 flex gap-6 border-b border-slate-200" aria-label="Main">
-          {TABS.map(({ id, label }) => (
+        <nav
+          className="mb-6 flex gap-1 rounded-xl border border-slate-200 bg-white p-1 shadow-sm"
+          aria-label="Add documents"
+        >
+          {TABS.map(({ id, label, icon: Icon }) => (
             <button
               key={id}
               type="button"
               onClick={() => setTab(id)}
               aria-current={tab === id ? "page" : undefined}
-              className={`-mb-px border-b-2 px-1 pb-3 text-sm font-medium transition ${
+              className={`flex flex-1 items-center justify-center gap-2 rounded-lg px-3 py-2.5 text-sm font-medium transition ${
                 tab === id
-                  ? "border-mech-600 text-mech-700"
-                  : "border-transparent text-slate-500 hover:border-slate-300 hover:text-slate-700"
+                  ? "bg-mech-600 text-white shadow-sm"
+                  : "text-slate-600 hover:bg-slate-50 hover:text-slate-900"
               }`}
             >
+              <Icon className="h-4 w-4" />
               {label}
             </button>
           ))}
         </nav>
 
-        <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
+        <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-card sm:p-6">
           {tab === "sweep" ? (
             <SweepPanel onAdd={library.addFromSweep} addedUrls={library.addedUrls} />
           ) : (
@@ -71,9 +79,17 @@ export default function Home() {
           )}
         </div>
 
+        <CategoryInsights
+          documents={library.documents}
+          selectedCategory={domainFilter}
+          onCategorySelect={setDomainFilter}
+        />
+
         <DocLibrary
           variant="home"
           documents={library.documents}
+          domainFilter={domainFilter}
+          onClearDomainFilter={() => setDomainFilter(null)}
           onRemove={library.requestRemoveDoc}
           onSelect={library.selectDoc}
           onRetry={library.retryDoc}
@@ -99,13 +115,14 @@ export default function Home() {
       <ConfirmDialog
         open={library.showClearConfirm}
         title="Clear all documents?"
-        description={`Remove all ${library.documents.length} documents from your library.`}
-        confirmLabel="Clear"
+        description={`Remove all ${library.documents.length} documents from your library. This cannot be undone.`}
+        confirmLabel="Clear all"
         variant="danger"
         onConfirm={() => {
           library.setDocuments([]);
           library.setSelectedDoc(null);
           library.setShowClearConfirm(false);
+          toast("Library cleared", "info");
         }}
         onCancel={() => library.setShowClearConfirm(false)}
       />

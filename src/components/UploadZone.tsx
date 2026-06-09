@@ -19,7 +19,8 @@ import {
 } from "@/lib/file-types";
 import { MAX_LIBRARY_DOCUMENTS } from "@/lib/constants";
 import type { DocType, DocumentPage, ExtractedTable, MechDocument } from "@/types";
-import { Spinner } from "@/components/ui/Icons";
+import Alert from "@/components/ui/Alert";
+import { Spinner, UploadIcon } from "@/components/ui/Icons";
 
 export interface UploadedFile {
   title: string;
@@ -198,7 +199,10 @@ export default function UploadZone({ onUpload }: UploadZoneProps) {
           </>
         ) : (
           <>
-            <p className="text-sm font-medium text-slate-900">Drop files here</p>
+            <div className="flex h-12 w-12 items-center justify-center rounded-full bg-slate-100 text-slate-500">
+              <UploadIcon className="h-6 w-6" />
+            </div>
+            <p className="mt-4 text-sm font-medium text-slate-900">Drop files here</p>
             <p className="mt-1 text-xs text-slate-500">{SUPPORTED_TYPE_LABELS} — or click to browse</p>
           </>
         )}
@@ -219,9 +223,7 @@ export default function UploadZone({ onUpload }: UploadZoneProps) {
       </div>
 
       {error && (
-        <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
-          {error}
-        </div>
+        <Alert variant="error" title="Upload failed" detail={error} onRetry={() => setError(null)} retryLabel="Dismiss" />
       )}
     </div>
   );

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  dedupeSweepResultsByUrl,
   findDuplicateDocument,
   hashContent,
   normalizeDocumentUrl,
@@ -42,5 +43,13 @@ describe("duplicate helpers", () => {
       "1"
     );
     expect(removeDuplicateDocuments(docs).map((item) => item.id)).toEqual(["1"]);
+  });
+
+  it("dedupes sweep results with normalized URLs", () => {
+    const merged = dedupeSweepResultsByUrl([
+      { url: "https://a.test/1", title: "A", type: "pdf", description: "", relevanceScore: 1 },
+      { url: "https://a.test/1/", title: "A copy", type: "pdf", description: "", relevanceScore: 1 },
+    ]);
+    expect(merged).toHaveLength(1);
   });
 });

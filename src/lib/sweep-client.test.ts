@@ -15,16 +15,13 @@ function result(url: string): SweepResult {
 }
 
 describe("mergeSweepResults", () => {
-  it("deduplicates by url", () => {
+  it("deduplicates by normalized url", () => {
     const merged = mergeSweepResults(
       [result("https://a.test/1")],
-      [result("https://a.test/1"), result("https://a.test/2")]
+      [result("https://a.test/1/"), result("https://a.test/2")]
     );
     expect(merged).toHaveLength(2);
-    expect(merged.map((r) => r.url)).toEqual([
-      "https://a.test/1",
-      "https://a.test/2",
-    ]);
+    expect(merged.map((r) => r.url)).toEqual(["https://a.test/1", "https://a.test/2"]);
   });
 });
 

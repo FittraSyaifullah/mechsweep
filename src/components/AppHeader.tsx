@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import Button from "@/components/ui/Button";
+import { ExportIcon, LogoMark } from "@/components/ui/Icons";
 
 interface AppHeaderProps {
   readyCount: number;
@@ -23,35 +24,53 @@ export default function AppHeader({
   maxWidth = "3xl",
 }: AppHeaderProps) {
   const widthClass = maxWidth === "6xl" ? "max-w-6xl" : "max-w-3xl";
-  const capacityLabel =
-    maxDocuments && totalCount > 0
-      ? `${totalCount.toLocaleString()} / ${maxDocuments.toLocaleString()} documents`
-      : null;
+
+  const statusLine = (() => {
+    if (processingCount > 0) {
+      return (
+        <span className="inline-flex items-center gap-1.5">
+          <span className="relative flex h-2 w-2">
+            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-sky-400 opacity-60" />
+            <span className="relative inline-flex h-2 w-2 rounded-full bg-sky-500" />
+          </span>
+          {processingCount} processing · {readyCount} ready
+        </span>
+      );
+    }
+    if (totalCount > 0) {
+      const capacity =
+        maxDocuments && totalCount > 0
+          ? `${totalCount.toLocaleString()} / ${maxDocuments.toLocaleString()}`
+          : `${totalCount.toLocaleString()}`;
+      return `${capacity} documents · ${readyCount} ready to export`;
+    }
+    return `Store up to ${maxDocuments?.toLocaleString() ?? "5,000"} documents locally`;
+  })();
 
   return (
-    <header className="border-b border-slate-200 bg-white">
-      <div className={`mx-auto flex ${widthClass} items-center justify-between gap-4 px-4 py-4`}>
-        <div>
-          <Link href="/" className="text-lg font-semibold text-slate-900 hover:text-mech-700">
-            MechSweep
+    <header className="sticky top-0 z-40 border-b border-slate-200/80 bg-white/95 backdrop-blur-sm">
+      <div className={`mx-auto flex ${widthClass} items-center justify-between gap-4 px-4 py-3.5`}>
+        <div className="flex min-w-0 items-center gap-3">
+          <Link href="/" className="shrink-0 rounded-lg transition hover:opacity-90">
+            <LogoMark className="h-9 w-9" />
           </Link>
-          <p className="text-xs text-slate-500">
-            {processingCount > 0
-              ? `${processingCount} processing · ${readyCount} ready`
-              : totalCount > 0
-                ? capacityLabel
-                  ? `${capacityLabel} · ${readyCount} ready to export`
-                  : `${readyCount} of ${totalCount} ready to export`
-                : `Up to ${maxDocuments?.toLocaleString() ?? "5,000"} documents stored locally`}
-          </p>
+          <div className="min-w-0">
+            <Link
+              href="/"
+              className="text-base font-semibold text-slate-900 hover:text-mech-700 sm:text-lg"
+            >
+              MechSweep
+            </Link>
+            <p className="truncate text-xs text-slate-500">{statusLine}</p>
+          </div>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex shrink-0 items-center gap-1.5 sm:gap-2">
           <Link
             href="/libraries"
-            className="rounded-lg px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-100 hover:text-slate-900"
+            className="rounded-lg px-2.5 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-100 hover:text-slate-900 sm:px-3 sm:text-sm"
           >
-            Libraries
+            Library
           </Link>
           {totalCount > 0 && (
             <Button variant="ghost" size="sm" onClick={onClearAll}>
@@ -63,9 +82,11 @@ export default function AppHeader({
             size="sm"
             onClick={onExport}
             disabled={readyCount === 0}
+            icon={<ExportIcon className="h-3.5 w-3.5" />}
             title={readyCount === 0 ? "Analyze documents first" : undefined}
           >
-            Export{readyCount > 0 ? ` (${readyCount})` : ""}
+            <span className="hidden sm:inline">Export</span>
+            {readyCount > 0 ? ` (${readyCount})` : ""}
           </Button>
         </div>
       </div>

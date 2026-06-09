@@ -2,10 +2,12 @@
 
 import { useDeferredValue, useEffect, useMemo, useState } from "react";
 import DocCard from "@/components/DocCard";
-import { Spinner } from "@/components/ui/Icons";
+import EmptyState from "@/components/ui/EmptyState";
+import { GridIcon, Spinner } from "@/components/ui/Icons";
 import { MAX_LIBRARY_DOCUMENTS } from "@/lib/constants";
+import { normalizeCategory } from "@/lib/category-stats";
 import { DOC_TYPES, docTypeLabel } from "@/lib/file-types";
-import type { DocSource, DocStatus, DocType, MechDocument } from "@/types";
+import type { DocSource, DocStatus, DocType, MeCategory, MechDocument } from "@/types";
 
 interface DocLibraryProps {
   documents: MechDocument[];
@@ -17,6 +19,9 @@ interface DocLibraryProps {
   onBulkExport?: (docs: MechDocument[]) => void;
   onBulkDelete?: (ids: string[]) => void;
   onBulkRetry?: (docs: MechDocument[]) => void;
+  /** Filter library to a domain selected from the pie chart. */
+  domainFilter?: MeCategory | null;
+  onClearDomainFilter?: () => void;
 }
 
 type SortOption = "newest" | "oldest" | "title" | "type";
@@ -49,6 +54,8 @@ export default function DocLibrary({
   onBulkExport,
   onBulkDelete,
   onBulkRetry,
+  domainFilter = null,
+  onClearDomainFilter,
 }: DocLibraryProps) {
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<DocStatus | "all">("all");
@@ -132,7 +139,10 @@ export default function DocLibrary({
         if (statusFilter !== "all" && d.status !== statusFilter) return false;
         if (typeFilter !== "all" && d.type !== typeFilter) return false;
         if (sourceFilter !== "all" && d.source !== sourceFilter) return false;
-        if (categoryFilter !== "all" && d.category !== categoryFilter) return false;
+        if (categoryFilter !== "all" && normalizeCategory(d.category) !== categoryFilter) {
+          return false;
+        }
+        if (domainFilter && normalizeCategory(d.category) !== domainFilter) return false;
         if (tagFilter !== "all" && !(d.tags ?? []).includes(tagFilter)) return false;
         if (maxAgeMs && now - new Date(d.addedAt).getTime() > maxAgeMs) return false;
         if (!q) return true;
@@ -172,6 +182,7 @@ export default function DocLibrary({
     typeFilter,
     sourceFilter,
     categoryFilter,
+    domainFilter,
     tagFilter,
     dateFilter,
     searchMode,
@@ -227,13 +238,16 @@ export default function DocLibrary({
 
   if (documents.length === 0) {
     return (
-      <div className="mt-8 rounded-lg border border-dashed border-slate-300 bg-white px-6 py-10 text-center">
-        <p className="text-sm font-medium text-slate-700">No documents yet</p>
-        <p className="mt-1 text-sm text-slate-500">
-          {variant === "libraries"
-            ? "Go to Add documents to sweep the web or upload files."
-            : "Use Web Sweep to find documents or Upload to add local files."}
-        </p>
+      <div className="mt-8 rounded-xl border border-dashed border-slate-300 bg-white shadow-sm">
+        <EmptyState
+          icon={<GridIcon className="h-6 w-6" />}
+          title="Your library is empty"
+          description={
+            variant === "libraries"
+              ? "Go to the home page to sweep the web or upload local files."
+              : "Documents you add from Web Sweep or Upload appear here — searchable, analyzable, and exportable for RAG."
+          }
+        />
       </div>
     );
   }
@@ -325,6 +339,21 @@ export default function DocLibrary({
             ? `Library full (${MAX_LIBRARY_DOCUMENTS.toLocaleString()} documents). Remove documents to add more.`
             : `Approaching library limit — ${(MAX_LIBRARY_DOCUMENTS - documents.length).toLocaleString()} slots remaining.`}
         </p>
+      )}
+
+      {domainFilter && (
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-mech-200 bg-mech-50 px-3 py-2 text-sm text-mech-800">
+          <span>
+            Showing <strong>{domainFilter}</strong> documents from chart
+          </span>
+          <button
+            type="button"
+            onClick={onClearDomainFilter}
+            className="rounded-md bg-white px-2.5 py-1 text-xs font-medium text-mech-700 ring-1 ring-mech-200 hover:bg-mech-100"
+          >
+            Clear filter
+          </button>
+        </div>
       )}
 
       <div className="mb-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-[1fr_auto_auto_auto_auto]">

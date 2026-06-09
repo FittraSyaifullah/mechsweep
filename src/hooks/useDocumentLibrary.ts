@@ -15,7 +15,13 @@ import {
 } from "@/lib/document-content";
 import { fetchJson } from "@/lib/fetch-json";
 import { LIBRARY_SAVE_DEBOUNCE_MS, MAX_LIBRARY_DOCUMENTS } from "@/lib/constants";
-import { findDuplicateDocument, hashContent } from "@/lib/duplicates";
+import {
+  buildNormalizedUrlSet,
+  dedupeSweepResultsByUrl,
+  findDuplicateDocument,
+  hashContent,
+  normalizeDocumentUrl,
+} from "@/lib/duplicates";
 import {
   isLibraryAtCapacity,
   loadDocuments,
@@ -102,9 +108,11 @@ export function useDocumentLibrary(options: UseDocumentLibraryOptions = {}) {
   }, [documents, selectedDoc]);
 
   const addedUrls = useMemo(
-    () => new Set(documents.filter((d) => d.url).map((d) => d.url as string)),
+    () => buildNormalizedUrlSet(documents.map((doc) => doc.url)),
     [documents]
   );
+
+  const pendingAddUrlsRef = useRef<Set<string>>(new Set());
 
   const readyCount = documents.filter((d) => d.status === "ready").length;
   const processingCount = documents.filter((d) => d.status === "processing").length;
@@ -263,18 +271,38 @@ export function useDocumentLibrary(options: UseDocumentLibraryOptions = {}) {
         );
 
         if (recovered) {
-          setDocuments((prev) =>
-            prev.map((d) =>
+          const contentHash = await hashContent(recovered);
+          let skippedDuplicate = false;
+
+          setDocuments((prev) => {
+            const duplicate = findDuplicateDocument(prev.filter((doc) => doc.id !== id), {
+              contentHash,
+              url: result.url,
+              title: result.title,
+            });
+            if (duplicate) {
+              skippedDuplicate = true;
+              return prev.filter((doc) => doc.id !== id);
+            }
+
+            return prev.map((d) =>
               d.id === id
                 ? {
                     ...d,
                     content: recovered,
+                    contentHash,
                     prefetchedText: result.prefetchedText,
                     category: d.category ?? result.category,
                   }
                 : d
-            )
-          );
+            );
+          });
+
+          if (skippedDuplicate) {
+            toast(`Skipped duplicate: ${result.title}`, "info");
+            return;
+          }
+
           await analyzeDoc(id, recovered, result.title, result.type, result.category);
           void embedDoc(id, recovered, result.title);
           toast(`Used cached preview for "${result.title}"`, "info");
@@ -340,50 +368,64 @@ export function useDocumentLibrary(options: UseDocumentLibraryOptions = {}) {
 
   const addFromSweep = useCallback(
     async (result: SweepResult) => {
+      const normalizedUrl = normalizeDocumentUrl(result.url) ?? result.url.trim();
+      if (pendingAddUrlsRef.current.has(normalizedUrl)) {
+        toast(`Already adding: ${result.title}`, "info");
+        return;
+      }
+
+      pendingAddUrlsRef.current.add(normalizedUrl);
       const id = uuidv4();
       let skippedDuplicate = false;
       let skippedFull = false;
 
-      setDocuments((prev) => {
-        if (isLibraryAtCapacity(prev.length)) {
-          skippedFull = true;
-          return prev;
-        }
+      try {
+        setDocuments((prev) => {
+          if (isLibraryAtCapacity(prev.length)) {
+            skippedFull = true;
+            return prev;
+          }
 
-        const duplicate = findDuplicateDocument(prev, { url: result.url });
-        if (duplicate) {
-          skippedDuplicate = true;
-          return prev;
-        }
-
-        return [
-          {
-            id,
+          const duplicate = findDuplicateDocument(prev, {
+            url: normalizedUrl,
             title: result.title,
-            type: result.type,
-            source: "sweep",
-            url: result.url,
-            content: "",
-            category: result.category,
-            prefetchedText: result.prefetchedText,
-            addedAt: new Date().toISOString(),
-            status: "processing",
-          },
-          ...prev,
-        ];
-      });
+          });
+          if (duplicate) {
+            skippedDuplicate = true;
+            return prev;
+          }
 
-      if (skippedFull) {
-        toast(`Library full (${MAX_LIBRARY_DOCUMENTS} documents). Remove some to add more.`, "error");
-        return;
+          return [
+            {
+              id,
+              title: result.title,
+              type: result.type,
+              source: "sweep",
+              url: normalizedUrl,
+              content: "",
+              category: result.category,
+              prefetchedText: result.prefetchedText,
+              addedAt: new Date().toISOString(),
+              status: "processing",
+            },
+            ...prev,
+          ];
+        });
+
+        if (skippedFull) {
+          toast(`Library full (${MAX_LIBRARY_DOCUMENTS} documents). Remove some to add more.`, "error");
+          return;
+        }
+
+        if (skippedDuplicate) {
+          toast(`Already in library: ${result.title}`, "info");
+          return;
+        }
+
+        await fetchAndAnalyze(id, { ...result, url: normalizedUrl });
+      } finally {
+        pendingAddUrlsRef.current.delete(normalizedUrl);
       }
-
-      if (skippedDuplicate) {
-        toast(`Already in library: ${result.title}`, "info");
-        return;
-      }
-
-      await fetchAndAnalyze(id, result);
     },
     [fetchAndAnalyze, toast]
   );
@@ -413,6 +455,7 @@ export function useDocumentLibrary(options: UseDocumentLibraryOptions = {}) {
         const contentHash = await hashContent(file.content);
         const duplicate = findDuplicateDocument([...documents, ...newDocs], {
           contentHash,
+          title: file.title,
         });
 
         if (duplicate) {
