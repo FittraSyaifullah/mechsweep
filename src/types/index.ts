@@ -22,6 +22,7 @@ export interface MechDocument {
   rowCount?: number;
   sizeBytes?: number;
   contentHash?: string;
+  prefetchedText?: string;
   addedAt: string;
   status: DocStatus;
   error?: string;
@@ -47,6 +48,7 @@ export interface SweepResult {
   description: string;
   relevanceScore: number;
   category?: string;
+  prefetchedText?: string;
 }
 
 export interface ExportOptions {

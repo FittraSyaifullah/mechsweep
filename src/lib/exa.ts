@@ -32,6 +32,7 @@ export function mapExaResult(result: ExaSearchResult, index: number): SweepResul
       "Mechanical engineering resource",
     relevanceScore: result.highlightScores?.[0] ?? Math.max(0.45, 1 - index * 0.02),
     category: "Other",
+    prefetchedText: result.text?.trim() || undefined,
   };
 }
 
@@ -68,7 +69,10 @@ export async function searchExa(query: string, excludeUrls: string[] = []): Prom
       type: searchType,
       numResults,
       ...(excludedDomains.length > 0 ? { excludeDomains: excludedDomains } : {}),
-      contents: { highlights: true },
+      contents: {
+        highlights: true,
+        text: { maxCharacters: 12000 },
+      },
     }),
   });
 

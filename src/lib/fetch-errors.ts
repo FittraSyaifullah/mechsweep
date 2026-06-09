@@ -66,8 +66,9 @@ export function isSupportedContentType(contentType: string | null, url?: string)
   const lower = contentType.toLowerCase();
   if (lower.includes("application/octet-stream")) {
     if (!url) return true;
-    return /\.(pdf|csv|txt)(\?|#|$)/i.test(url);
+    return /\.(pdf|csv|txt|html?)(\?|#|$)/i.test(url);
   }
+  if (lower.includes("application/download")) return true;
   return (
     lower.includes("application/pdf") ||
     lower.includes("text/csv") ||

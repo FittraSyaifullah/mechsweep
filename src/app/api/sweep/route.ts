@@ -85,7 +85,17 @@ async function validateSweepResult(result: SweepResult): Promise<SweepResult | n
   }
 }
 
-async function finalizeSweepResults(candidates: SweepResult[]): Promise<SweepResult[]> {
+async function finalizeSweepResults(
+  candidates: SweepResult[],
+  options: { skipValidation?: boolean } = {}
+): Promise<SweepResult[]> {
+  if (options.skipValidation) {
+    return candidates
+      .slice()
+      .sort((a, b) => b.relevanceScore - a.relevanceScore)
+      .slice(0, MAX_RESULTS);
+  }
+
   const settled = await Promise.all(candidates.map(validateSweepResult));
   return settled
     .filter((r): r is SweepResult => r !== null)
@@ -148,7 +158,7 @@ export async function POST(request: NextRequest) {
     if (exaSearchEnabled()) {
       try {
         const exaCandidates = (await searchExa(query, excluded)).slice(0, MAX_AI_CANDIDATES);
-        const results = await finalizeSweepResults(exaCandidates);
+        const results = await finalizeSweepResults(exaCandidates, { skipValidation: true });
         return NextResponse.json({ results, provider: "exa" });
       } catch (error) {
         const reason = error instanceof Error ? error.message : "Exa search failed";

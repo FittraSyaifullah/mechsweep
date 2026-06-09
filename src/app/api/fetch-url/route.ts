@@ -17,7 +17,8 @@ import {
 } from "@/lib/processing";
 import {
   DEFAULT_FETCH_TIMEOUT_MS,
-  fetchRemoteUrl,
+  decodeBufferText,
+  fetchDocumentBuffer,
   inferContentKind,
   isPdfBuffer,
 } from "@/lib/fetch-document";
@@ -39,13 +40,6 @@ function normalizeUrl(input: string): string {
   return new URL(withProtocol).toString();
 }
 
-function getResponseSize(response: Response): number | null {
-  const length = response.headers.get("content-length");
-  if (!length) return null;
-  const parsed = Number(length);
-  return Number.isFinite(parsed) ? parsed : null;
-}
-
 export async function POST(request: NextRequest) {
   let url: string | undefined;
   try {
@@ -64,34 +58,10 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const response = await fetchRemoteUrl(url, { timeoutMs: DEFAULT_FETCH_TIMEOUT_MS });
+    const { buffer, contentType, finalUrl } = await fetchDocumentBuffer(url, {
+      timeoutMs: DEFAULT_FETCH_TIMEOUT_MS,
+    });
 
-    if (!response.ok && response.status !== 206) {
-      return NextResponse.json(
-        { error: failedStatusMessage(response.status, response.statusText, url) },
-        { status: response.status === 404 ? 404 : 502 }
-      );
-    }
-
-    const contentType = response.headers.get("content-type");
-    if (!isSupportedContentType(contentType, url)) {
-      return NextResponse.json(
-        { error: unsupportedContentTypeMessage(contentType, url) },
-        { status: 415 }
-      );
-    }
-
-    const fallbackType = body.type ?? detectDocTypeFromUrl(url);
-    const responseSize = getResponseSize(response);
-
-    if (responseSize && responseSize > MAX_FETCH_BYTES) {
-      return NextResponse.json(
-        { error: oversizedDocumentMessage(responseSize) },
-        { status: 413 }
-      );
-    }
-
-    const buffer = Buffer.from(await response.arrayBuffer());
     if (buffer.length > MAX_FETCH_BYTES) {
       return NextResponse.json(
         { error: oversizedDocumentMessage(buffer.length) },
@@ -99,7 +69,15 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const kind = inferContentKind(contentType, url, buffer);
+    const kind = inferContentKind(contentType, finalUrl, buffer);
+    if (kind === "unknown" && !isSupportedContentType(contentType, finalUrl)) {
+      return NextResponse.json(
+        { error: unsupportedContentTypeMessage(contentType, finalUrl) },
+        { status: 415 }
+      );
+    }
+
+    const fallbackType = body.type ?? detectDocTypeFromUrl(finalUrl);
     const type =
       kind === "pdf"
         ? "pdf"
@@ -124,7 +102,7 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    const text = buffer.toString("utf8");
+    const text = decodeBufferText(buffer);
     const sizeBytes = buffer.length;
 
     if (type === "csv" || kind === "csv") {
@@ -146,7 +124,7 @@ export async function POST(request: NextRequest) {
 
     if (!extractedText) {
       return NextResponse.json(
-        { error: `Fetched URL but could not extract text: ${url}` },
+        { error: `Fetched URL but could not extract text: ${finalUrl}` },
         { status: 422 }
       );
     }
@@ -161,6 +139,14 @@ export async function POST(request: NextRequest) {
       ocrStatus: "not_needed",
     });
   } catch (error) {
+    if (error instanceof Error && /^Fetch failed \(\d+\)$/.test(error.message)) {
+      const status = Number(error.message.match(/\d+/)?.[0] ?? 502);
+      return NextResponse.json(
+        { error: failedStatusMessage(status, "", url ?? "") },
+        { status: status === 404 ? 404 : 502 }
+      );
+    }
+
     const { message, status } = fetchExceptionMessage(error, url);
     return NextResponse.json({ error: message }, { status });
   }

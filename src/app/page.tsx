@@ -182,7 +182,10 @@ export default function Home() {
   );
 
   const fetchAndAnalyze = useCallback(
-    async (id: string, result: Pick<SweepResult, "url" | "type" | "title" | "category">) => {
+    async (
+      id: string,
+      result: Pick<SweepResult, "url" | "type" | "title" | "category" | "prefetchedText">
+    ) => {
       setDocuments((prev) =>
         prev.map((d) =>
           d.id === id ? { ...d, status: "processing" as const, error: undefined, content: "" } : d
@@ -190,13 +193,8 @@ export default function Home() {
       );
 
       try {
-        const res = await fetch("/api/fetch-url", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ url: result.url, type: result.type }),
-        });
-        const data = (await res.json()) as {
-          text?: string;
+        let content = result.prefetchedText?.trim() ?? "";
+        let fetchData: {
           type?: SweepResult["type"];
           sizeBytes?: number;
           pageCount?: number;
@@ -206,11 +204,32 @@ export default function Home() {
           detectedUnits?: string[];
           ocrStatus?: MechDocument["ocrStatus"];
           rowCount?: number;
-          error?: string;
-        };
-        if (!res.ok) throw new Error(data.error ?? "Fetch failed");
+        } = {};
 
-        const content = data.text ?? "";
+        if (!content) {
+          const res = await fetch("/api/fetch-url", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ url: result.url, type: result.type }),
+          });
+          const data = (await res.json()) as {
+            text?: string;
+            type?: SweepResult["type"];
+            sizeBytes?: number;
+            pageCount?: number;
+            pages?: MechDocument["pages"];
+            tables?: MechDocument["tables"];
+            detectedLanguage?: string;
+            detectedUnits?: string[];
+            ocrStatus?: MechDocument["ocrStatus"];
+            rowCount?: number;
+            error?: string;
+          };
+          if (!res.ok) throw new Error(data.error ?? "Fetch failed");
+          content = data.text ?? "";
+          fetchData = data;
+        }
+
         if (!content.trim()) {
           throw new Error("Fetched URL but no readable text was found");
         }
@@ -232,17 +251,18 @@ export default function Home() {
             d.id === id
               ? {
                   ...d,
-                  type: data.type ?? d.type,
+                  type: fetchData.type ?? d.type,
                   content,
                   contentHash,
-                  sizeBytes: data.sizeBytes,
-                  pageCount: data.pageCount,
-                  pages: data.pages,
-                  tables: data.tables,
-                  detectedLanguage: data.detectedLanguage,
-                  detectedUnits: data.detectedUnits,
-                  ocrStatus: data.ocrStatus,
-                  rowCount: data.rowCount,
+                  prefetchedText: result.prefetchedText,
+                  sizeBytes: fetchData.sizeBytes,
+                  pageCount: fetchData.pageCount,
+                  pages: fetchData.pages,
+                  tables: fetchData.tables,
+                  detectedLanguage: fetchData.detectedLanguage,
+                  detectedUnits: fetchData.detectedUnits,
+                  ocrStatus: fetchData.ocrStatus,
+                  rowCount: fetchData.rowCount,
                 }
               : d
           )
@@ -257,7 +277,7 @@ export default function Home() {
             d.id === id ? { ...d, status: "error" as const, error: message } : d
           )
         );
-        toast(`Fetch failed: ${result.title}`, "error");
+        toast(message.length > 120 ? `${message.slice(0, 117)}…` : message, "error");
       }
     },
     [analyzeDoc, documents, embedDoc, toast]
@@ -281,6 +301,7 @@ export default function Home() {
           url: result.url,
           content: "",
           category: result.category,
+          prefetchedText: result.prefetchedText,
           addedAt: new Date().toISOString(),
           status: "processing",
         },
@@ -299,6 +320,7 @@ export default function Home() {
           type: doc.type,
           title: doc.title,
           category: doc.category,
+          prefetchedText: doc.prefetchedText,
         });
       } else if (doc.content) {
         setDocuments((prev) =>

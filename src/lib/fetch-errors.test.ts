@@ -35,10 +35,13 @@ describe("fetch error helpers", () => {
 });
 
 describe("fetch document helpers", () => {
-  it("detects pdf buffers and inferred kinds", () => {
+  it("detects pdf buffers, html sniffing, and inferred kinds", () => {
     const pdf = Buffer.from("%PDF-1.4 sample");
     expect(isPdfBuffer(pdf)).toBe(true);
     expect(inferContentKind("application/octet-stream", "https://x.com/file", pdf)).toBe("pdf");
     expect(inferContentKind("text/plain", "https://x.com/readme.txt")).toBe("text");
+    expect(
+      inferContentKind("application/octet-stream", "https://x.com/page", Buffer.from("<html><body>Hi</body></html>"))
+    ).toBe("html");
   });
 });

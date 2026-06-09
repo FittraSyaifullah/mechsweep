@@ -9,6 +9,7 @@ describe("Exa search helpers", () => {
         url: "https://example.edu/heat-transfer.pdf",
         highlights: ["Covers conduction and convection."],
         highlightScores: [0.91],
+        text: "Full page text",
       },
       0
     );
@@ -19,6 +20,7 @@ describe("Exa search helpers", () => {
       type: "pdf",
       description: "Covers conduction and convection.",
       relevanceScore: 0.91,
+      prefetchedText: "Full page text",
     });
   });
 
