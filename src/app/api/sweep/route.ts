@@ -107,7 +107,7 @@ export async function POST(request: NextRequest) {
         : query;
 
     const rawText = await callChatAI({
-      mistralModel: process.env.MISTRAL_SEARCH_MODEL ?? DEFAULT_MISTRAL_SEARCH_MODEL,
+      mistralModel: process.env.MISTRAL_SEARCH_MODEL?.trim() ?? DEFAULT_MISTRAL_SEARCH_MODEL,
       openRouterModel:
         process.env.OPENROUTER_SEARCH_MODEL ?? DEFAULT_OPENROUTER_SEARCH_MODEL,
       messages: [

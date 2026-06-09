@@ -14,10 +14,10 @@ interface MistralOptions {
 
 export async function callMistral(options: MistralOptions): Promise<string> {
   const apiKey = process.env.MISTRAL_API_KEY?.trim();
-  const baseUrl = process.env.MISTRAL_BASE_URL ?? "https://api.mistral.ai/v1";
+  const baseUrl = (process.env.MISTRAL_BASE_URL ?? "https://api.mistral.ai/v1").trim();
   const model =
-    options.model ??
-    process.env.MISTRAL_MODEL ??
+    options.model?.trim() ??
+    process.env.MISTRAL_MODEL?.trim() ??
     "mistral-small-latest";
 
   if (!apiKey) {
@@ -59,8 +59,8 @@ export async function callMistral(options: MistralOptions): Promise<string> {
 
 export async function callMistralEmbedding(input: string): Promise<number[]> {
   const apiKey = process.env.MISTRAL_API_KEY?.trim();
-  const baseUrl = process.env.MISTRAL_BASE_URL ?? "https://api.mistral.ai/v1";
-  const model = process.env.MISTRAL_EMBEDDING_MODEL ?? "mistral-embed";
+  const baseUrl = (process.env.MISTRAL_BASE_URL ?? "https://api.mistral.ai/v1").trim();
+  const model = process.env.MISTRAL_EMBEDDING_MODEL?.trim() ?? "mistral-embed";
 
   if (!apiKey) {
     throw new Error("MISTRAL_API_KEY is not configured");

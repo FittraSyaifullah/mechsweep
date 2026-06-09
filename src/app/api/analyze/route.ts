@@ -37,7 +37,7 @@ export async function POST(request: NextRequest) {
     const truncated = truncateContent(body.content, ANALYZE_CONTENT_CHARS);
 
     const rawText = await callChatAI({
-      mistralModel: process.env.MISTRAL_ANALYZE_MODEL ?? DEFAULT_MISTRAL_ANALYZE_MODEL,
+      mistralModel: process.env.MISTRAL_ANALYZE_MODEL?.trim() ?? DEFAULT_MISTRAL_ANALYZE_MODEL,
       openRouterModel:
         process.env.OPENROUTER_ANALYZE_MODEL ?? DEFAULT_OPENROUTER_ANALYZE_MODEL,
       messages: [
