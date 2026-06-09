@@ -7,8 +7,11 @@ import { Spinner } from "@/components/ui/Icons";
 
 const SUGGESTIONS = [
   "Heat transfer fundamentals",
-  "FEA tutorials",
-  "Fluid mechanics textbooks",
+  "FEA static analysis tutorials",
+  "Fluid mechanics open textbooks",
+  "Machine design reference datasheets",
+  "Thermodynamics problem sets",
+  "Robotics kinematics PDF",
 ];
 
 interface SweepPanelProps {
@@ -22,6 +25,7 @@ export default function SweepPanel({ onAdd, addedUrls }: SweepPanelProps) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [hasSearched, setHasSearched] = useState(false);
+  const [provider, setProvider] = useState<string | null>(null);
 
   async function handleSweep(searchQuery?: string, append = false) {
     const q = (searchQuery ?? query).trim();
@@ -42,8 +46,13 @@ export default function SweepPanel({ onAdd, addedUrls }: SweepPanelProps) {
             : Array.from(addedUrls),
         }),
       });
-      const data = (await res.json()) as { results?: SweepResult[]; error?: string };
+      const data = (await res.json()) as {
+        results?: SweepResult[];
+        provider?: string;
+        error?: string;
+      };
       if (!res.ok) throw new Error(data.error ?? "Sweep failed");
+      setProvider(data.provider ?? "mistral");
       const nextResults = data.results ?? [];
       setResults((prev) => {
         const merged = append ? [...prev] : [];
@@ -67,7 +76,8 @@ export default function SweepPanel({ onAdd, addedUrls }: SweepPanelProps) {
   return (
     <div className="space-y-4">
       <p className="text-sm text-slate-600">
-        Search the web for publicly accessible mechanical engineering documents. Sweep again to append more unique resources.
+        Search the web for up to 32 publicly accessible mechanical engineering documents per sweep.
+        Use Sweep more to append additional unique resources.
       </p>
 
       <div className="flex flex-col gap-2 sm:flex-row">
@@ -121,7 +131,10 @@ export default function SweepPanel({ onAdd, addedUrls }: SweepPanelProps) {
       {!loading && results.length > 0 && (
         <div className="space-y-2">
           <div className="flex items-center justify-between">
-            <p className="text-xs font-medium text-slate-500">{results.length} results</p>
+            <p className="text-xs font-medium text-slate-500">
+              {results.length} results
+              {provider ? ` · ${provider === "mistral" ? "Mistral AI" : provider}` : ""}
+            </p>
             <div className="flex items-center gap-3">
               <button
                 type="button"

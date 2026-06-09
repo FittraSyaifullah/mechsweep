@@ -9,20 +9,21 @@ import {
 import type { DocType, SweepResult } from "@/types";
 
 const VALIDATE_TIMEOUT_MS = 12000;
-const MAX_RESULTS = 24;
+const MAX_RESULTS = 32;
+const MAX_AI_CANDIDATES = 28;
 export const maxDuration = 60;
 const MAX_FETCH_BYTES = 15 * 1024 * 1024;
 const DEFAULT_MISTRAL_SEARCH_MODEL = "mistral-small-latest";
 const DEFAULT_OPENROUTER_SEARCH_MODEL = "perplexity/sonar-pro";
 
-const SWEEP_SYSTEM_PROMPT = `You are a mechanical engineering research agent. Find 8-10 real, publicly accessible mechanical engineering documents relevant to the user's query.
+const SWEEP_SYSTEM_PROMPT = `You are a mechanical engineering research agent. Find 20-24 real, publicly accessible mechanical engineering documents relevant to the user's query.
 
 Return ONLY valid JSON with this shape:
 {"results":[{"title":"...","url":"https://...","type":"pdf|txt|csv","description":"1 sentence","relevanceScore":0.0,"category":"..."}]}
 
 Each result needs title, real https url, type (pdf|txt|csv), description, relevanceScore (0-1), and category from: Thermodynamics, Fluid Mechanics, Solid Mechanics, Materials Science, Manufacturing, Dynamics & Vibrations, Heat Transfer, Machine Design, FEA / FEM, Control Systems, Robotics, HVAC, Other.
 
-Prefer university pages, NIST, NASA, manufacturer datasheets, and open textbooks.`;
+Prefer university pages, NIST, NASA, manufacturer datasheets, and open textbooks. Include diverse sources.`;
 
 function normalizeUrl(input: string): string | null {
   try {
@@ -87,21 +88,21 @@ export async function POST(request: NextRequest) {
   try {
     const body = (await request.json()) as { query?: string; excludeUrls?: string[] };
     const query = body.query?.trim() || "Find mechanical engineering documents";
-    const excluded = (body.excludeUrls ?? []).slice(0, 80);
+    const excluded = (body.excludeUrls ?? []).slice(0, 120);
     const userPrompt =
       excluded.length > 0
         ? `${query}\n\nAvoid these URLs because they are already in the user's current sweep/library:\n${excluded.join("\n")}`
         : query;
 
-    const rawText = await callChatAI({
+    const { text: rawText, provider } = await callChatAI({
       mistralModel: process.env.MISTRAL_SEARCH_MODEL?.trim() ?? DEFAULT_MISTRAL_SEARCH_MODEL,
       openRouterModel:
-        process.env.OPENROUTER_SEARCH_MODEL ?? DEFAULT_OPENROUTER_SEARCH_MODEL,
+        process.env.OPENROUTER_SEARCH_MODEL?.trim() ?? DEFAULT_OPENROUTER_SEARCH_MODEL,
       messages: [
         { role: "system", content: SWEEP_SYSTEM_PROMPT },
         { role: "user", content: userPrompt },
       ],
-      maxTokens: 1800,
+      maxTokens: 4500,
       temperature: 0.2,
       timeoutMs: 55000,
       responseFormat: { type: "json_object" },
@@ -132,7 +133,7 @@ export async function POST(request: NextRequest) {
         };
       })
       .filter((r): r is SweepResult => r !== null)
-      .slice(0, MAX_RESULTS);
+      .slice(0, MAX_AI_CANDIDATES);
 
     const settled = await Promise.all(candidates.map(validateSweepResult));
     const results = settled
@@ -140,7 +141,7 @@ export async function POST(request: NextRequest) {
       .sort((a, b) => b.relevanceScore - a.relevanceScore)
       .slice(0, MAX_RESULTS);
 
-    return NextResponse.json({ results });
+    return NextResponse.json({ results, provider });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Sweep failed";
     return NextResponse.json({ error: message }, { status: 500 });

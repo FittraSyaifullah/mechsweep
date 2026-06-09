@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { callEmbeddingAI } from "@/lib/ai";
 
-const EMBED_CONTENT_CHARS = 6000;
+const EMBED_CONTENT_CHARS = 8000;
 
 export async function POST(request: NextRequest) {
   try {
@@ -11,8 +11,8 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "text is required" }, { status: 400 });
     }
 
-    const embedding = await callEmbeddingAI(text.slice(0, EMBED_CONTENT_CHARS));
-    return NextResponse.json({ embedding });
+    const { embedding, provider } = await callEmbeddingAI(text.slice(0, EMBED_CONTENT_CHARS));
+    return NextResponse.json({ embedding, provider });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Embedding failed";
     return NextResponse.json({ error: message }, { status: 500 });

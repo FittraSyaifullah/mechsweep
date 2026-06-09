@@ -36,10 +36,10 @@ export async function POST(request: NextRequest) {
 
     const truncated = truncateContent(body.content, ANALYZE_CONTENT_CHARS);
 
-    const rawText = await callChatAI({
+    const { text: rawText, provider } = await callChatAI({
       mistralModel: process.env.MISTRAL_ANALYZE_MODEL?.trim() ?? DEFAULT_MISTRAL_ANALYZE_MODEL,
       openRouterModel:
-        process.env.OPENROUTER_ANALYZE_MODEL ?? DEFAULT_OPENROUTER_ANALYZE_MODEL,
+        process.env.OPENROUTER_ANALYZE_MODEL?.trim() ?? DEFAULT_OPENROUTER_ANALYZE_MODEL,
       messages: [
         { role: "system", content: ANALYZE_SYSTEM_PROMPT },
         {
@@ -60,6 +60,7 @@ export async function POST(request: NextRequest) {
       tags: result.tags ?? [],
       category: result.category ?? "Other",
       keyTopics: result.keyTopics ?? [],
+      provider,
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Analysis failed";
