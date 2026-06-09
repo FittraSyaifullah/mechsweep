@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import {
-  isUsableContent,
+  MIN_RECOVERY_CONTENT_CHARS,
   normalizeImportedContent,
 } from "@/lib/document-content";
 import { extractDocumentText } from "@/lib/document-extract";
@@ -42,10 +42,11 @@ function normalizeUrl(input: string): string {
 function fallbackPayload(
   fallbackText: string | undefined,
   type: DocType,
-  finalUrl: string
+  finalUrl: string,
+  minChars = MIN_RECOVERY_CONTENT_CHARS
 ) {
   const text = fallbackText ? normalizeImportedContent(fallbackText) : "";
-  if (!isUsableContent(text)) return null;
+  if (text.length < minChars) return null;
 
   return {
     text,
@@ -77,6 +78,35 @@ function resolveDocType(
   if (fromContentType !== "txt" || kind !== "html") return fromContentType;
 
   return requestedType ?? detectDocTypeFromUrl(finalUrl);
+}
+
+async function extractWithFallback(
+  type: DocType,
+  buffer: Buffer,
+  finalUrl: string,
+  kind: ReturnType<typeof inferContentKind>
+) {
+  const attempts: DocType[] = [type];
+  if (kind === "html" && !attempts.includes("txt")) attempts.push("txt");
+  if (isPdfBuffer(buffer) && !attempts.includes("pdf")) attempts.push("pdf");
+  if (isZipBuffer(buffer) && !attempts.includes("zip")) attempts.push("zip");
+  if (!attempts.includes("txt")) attempts.push("txt");
+
+  let lastError: unknown;
+  for (const attemptType of attempts) {
+    try {
+      const extracted = await extractDocumentText(attemptType, buffer, finalUrl);
+      if (extracted.text.trim()) {
+        return { extracted, type: attemptType };
+      }
+    } catch (error) {
+      lastError = error;
+    }
+  }
+
+  throw lastError instanceof Error
+    ? lastError
+    : new Error(`Fetched URL but could not extract text: ${finalUrl}`);
 }
 
 export async function POST(request: NextRequest) {
@@ -121,7 +151,14 @@ export async function POST(request: NextRequest) {
     }
 
     const kind = inferContentKind(contentType, finalUrl, buffer);
-    if (kind === "unknown" && !isSupportedContentType(contentType, finalUrl)) {
+    const sniffedHtml =
+      kind === "html" || (buffer.length > 0 && /^\s*</.test(buffer.subarray(0, 256).toString("utf8")));
+
+    if (
+      kind === "unknown" &&
+      !sniffedHtml &&
+      !isSupportedContentType(contentType, finalUrl)
+    ) {
       const unsupportedFallback = fallbackPayload(fallbackText, requestedType, finalUrl);
       if (unsupportedFallback) return NextResponse.json(unsupportedFallback);
 
@@ -132,10 +169,15 @@ export async function POST(request: NextRequest) {
     }
 
     const type = resolveDocType(finalUrl, contentType, buffer, requestedType, kind);
-    const extracted = await extractDocumentText(type, buffer, finalUrl);
+    const { extracted, type: resolvedType } = await extractWithFallback(
+      type,
+      buffer,
+      finalUrl,
+      sniffedHtml ? "html" : kind
+    );
 
     if (!extracted.text.trim()) {
-      const emptyFallback = fallbackPayload(fallbackText, type, finalUrl);
+      const emptyFallback = fallbackPayload(fallbackText, resolvedType, finalUrl);
       if (emptyFallback) return NextResponse.json(emptyFallback);
 
       return NextResponse.json(
@@ -148,7 +190,7 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({
       text: extracted.text,
-      type,
+      type: resolvedType,
       sizeBytes: buffer.length,
       pageCount: extracted.pageCount,
       pages: extracted.pages,

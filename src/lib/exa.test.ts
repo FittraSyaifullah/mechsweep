@@ -20,8 +20,8 @@ describe("Exa search helpers", () => {
       type: "pdf",
       description: "Covers conduction and convection.",
       relevanceScore: 0.91,
-      prefetchedText: "Full page text",
     });
+    expect(mapped?.prefetchedText).toContain("Full page text");
   });
 
   it("returns null when url is missing", () => {

@@ -3,6 +3,12 @@ export const DEFAULT_FETCH_TIMEOUT_MS = 45000;
 const BROWSER_UA =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36";
 
+const GOOGLEBOT_UA =
+  "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)";
+
+const ACCEPT_ALL_DOCS =
+  "application/pdf,text/csv,text/plain,text/html,application/xhtml+xml,application/json,text/markdown,application/zip,application/x-zip-compressed,application/octet-stream,model/stl,application/sla,model/step,application/step,*/*;q=0.8";
+
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -33,8 +39,7 @@ function buildHeaders(url: string, variant: number, rangeEnd?: number): HeadersI
   if (variant === 0) {
     return {
       ...base,
-      Accept:
-        "application/pdf,text/csv,text/plain,text/html,application/xhtml+xml,application/octet-stream,*/*;q=0.8",
+      Accept: ACCEPT_ALL_DOCS,
       "User-Agent": BROWSER_UA,
       ...(rangeEnd !== undefined ? { Range: `bytes=0-${rangeEnd}` } : {}),
     };
@@ -48,10 +53,18 @@ function buildHeaders(url: string, variant: number, rangeEnd?: number): HeadersI
     };
   }
 
+  if (variant === 2) {
+    return {
+      "Accept-Language": "en-US,en;q=0.9",
+      Accept: ACCEPT_ALL_DOCS,
+      "User-Agent": BROWSER_UA,
+    };
+  }
+
   return {
     "Accept-Language": "en-US,en;q=0.9",
-    Accept: "application/pdf,text/html,text/plain,*/*",
-    "User-Agent": BROWSER_UA,
+    Accept: ACCEPT_ALL_DOCS,
+    "User-Agent": GOOGLEBOT_UA,
   };
 }
 
@@ -60,14 +73,14 @@ export async function fetchRemoteUrl(
   options: FetchRemoteOptions = {}
 ): Promise<Response> {
   const timeoutMs = options.timeoutMs ?? DEFAULT_FETCH_TIMEOUT_MS;
-  const retries = options.retries ?? 2;
+  const retries = options.retries ?? 3;
   let useRange = options.rangeEnd;
 
   let lastResponse: Response | null = null;
   let lastError: unknown;
 
   for (let attempt = 0; attempt <= retries; attempt++) {
-    const headerVariant = Math.min(attempt, 2);
+    const headerVariant = Math.min(attempt, 3);
     try {
       const response = await fetch(url, {
         method: "GET",
@@ -87,7 +100,7 @@ export async function fetchRemoteUrl(
         continue;
       }
 
-      if ([401, 403, 429, 502, 503, 504].includes(response.status) && attempt < retries) {
+      if ([401, 403, 405, 429, 502, 503, 504].includes(response.status) && attempt < retries) {
         useRange = undefined;
         await sleep(400 * (attempt + 1));
         continue;

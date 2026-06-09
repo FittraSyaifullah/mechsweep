@@ -10,9 +10,11 @@ import ExportModal from "@/components/ExportModal";
 import { Spinner } from "@/components/ui/Icons";
 import { useToast } from "@/components/Toast";
 import {
+  combineFallbackSources,
   fetchDocumentContent,
-  isUsableContent,
   normalizeImportedContent,
+  recoverContentFromSources,
+  shouldSkipDirectFetch,
 } from "@/lib/document-content";
 import { loadDocuments, saveDocuments } from "@/lib/storage";
 import type { AnalyzeResult, MechDocument } from "@/types";
@@ -156,11 +158,20 @@ export default function LibrariesPage() {
           const prefetched = doc.prefetchedText
             ? normalizeImportedContent(doc.prefetchedText)
             : "";
-          let content = isUsableContent(prefetched) ? prefetched : "";
+          const fallbackBundle = combineFallbackSources(
+            doc.prefetchedText,
+            doc.summary,
+            doc.title
+          );
+          let content = shouldSkipDirectFetch(doc.url, prefetched) ? prefetched : "";
           let fetchData: Awaited<ReturnType<typeof fetchDocumentContent>> | null = null;
 
           if (!content) {
-            fetchData = await fetchDocumentContent(doc.url, doc.type, doc.prefetchedText);
+            fetchData = await fetchDocumentContent(
+              doc.url,
+              doc.type,
+              fallbackBundle || undefined
+            );
             content = fetchData.text;
           }
 
@@ -188,6 +199,23 @@ export default function LibrariesPage() {
 
           await analyzeDoc({ ...doc, content, type: docType });
         } catch (err) {
+          const recovered = recoverContentFromSources(
+            doc.prefetchedText,
+            doc.summary,
+            doc.title
+          );
+
+          if (recovered) {
+            setDocuments((prev) =>
+              prev.map((item) =>
+                item.id === doc.id ? { ...item, content: recovered } : item
+              )
+            );
+            await analyzeDoc({ ...doc, content: recovered });
+            toast(`Used cached preview for "${doc.title}"`, "info");
+            return;
+          }
+
           const message = err instanceof Error ? err.message : "Fetch failed";
           setDocuments((prev) =>
             prev.map((item) =>

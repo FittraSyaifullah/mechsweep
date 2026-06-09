@@ -33,7 +33,11 @@ export function mapExaResult(result: ExaSearchResult, index: number): SweepResul
       "Mechanical engineering resource",
     relevanceScore: result.highlightScores?.[0] ?? Math.max(0.45, 1 - index * 0.02),
     category: "Other",
-    prefetchedText: buildPrefetchedContent(result.text, result.highlights),
+    prefetchedText: buildPrefetchedContent(
+      result.text,
+      result.highlights,
+      result.summary
+    ),
   };
 }
 

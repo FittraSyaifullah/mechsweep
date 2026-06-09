@@ -56,3 +56,7 @@ export function docTypeFromExtension(path: string): DocType | null {
 export function docTypeLabel(type: DocType): string {
   return type.toUpperCase();
 }
+
+export function hasDirectDocumentUrl(url: string): boolean {
+  return docTypeFromExtension(url) !== null;
+}

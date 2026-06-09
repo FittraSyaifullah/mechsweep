@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { docTypeFromExtension, isDocType } from "@/lib/file-types";
+import { docTypeFromExtension, hasDirectDocumentUrl, isDocType } from "@/lib/file-types";
 
 describe("file type helpers", () => {
   it("maps extensions to document types", () => {
@@ -16,5 +16,10 @@ describe("file type helpers", () => {
     expect(isDocType("pdf")).toBe(true);
     expect(isDocType("dwg")).toBe(true);
     expect(isDocType("docx")).toBe(false);
+  });
+
+  it("detects direct document urls", () => {
+    expect(hasDirectDocumentUrl("https://example.com/manual.pdf")).toBe(true);
+    expect(hasDirectDocumentUrl("https://example.com/blog/post")).toBe(false);
   });
 });

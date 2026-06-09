@@ -12,9 +12,11 @@ import UploadZone, { type UploadedFile } from "@/components/UploadZone";
 import ConfirmDialog from "@/components/ui/ConfirmDialog";
 import { Spinner } from "@/components/ui/Icons";
 import {
+  combineFallbackSources,
   fetchDocumentContent,
-  isUsableContent,
   normalizeImportedContent,
+  recoverContentFromSources,
+  shouldSkipDirectFetch,
   type FetchedDocumentContent,
 } from "@/lib/document-content";
 import { findDuplicateDocument, hashContent } from "@/lib/duplicates";
@@ -190,7 +192,7 @@ export default function Home() {
   const fetchAndAnalyze = useCallback(
     async (
       id: string,
-      result: Pick<SweepResult, "url" | "type" | "title" | "category" | "prefetchedText">
+      result: Pick<SweepResult, "url" | "type" | "title" | "category" | "prefetchedText" | "description">
     ) => {
       setDocuments((prev) =>
         prev.map((d) =>
@@ -198,18 +200,24 @@ export default function Home() {
         )
       );
 
+      const fallbackBundle = combineFallbackSources(
+        result.prefetchedText,
+        result.description,
+        result.title
+      );
+
       try {
         const prefetched = result.prefetchedText
           ? normalizeImportedContent(result.prefetchedText)
           : "";
         let fetchData: FetchedDocumentContent = { text: "" };
-        let content = isUsableContent(prefetched) ? prefetched : "";
+        let content = shouldSkipDirectFetch(result.url, prefetched) ? prefetched : "";
 
         if (!content) {
           fetchData = await fetchDocumentContent(
             result.url,
             result.type,
-            result.prefetchedText
+            fallbackBundle || undefined
           );
           content = fetchData.text;
         }
@@ -257,6 +265,31 @@ export default function Home() {
         await analyzeDoc(id, content, result.title, docType);
         void embedDoc(id, content, result.title);
       } catch (err) {
+        const recovered = recoverContentFromSources(
+          result.prefetchedText,
+          result.description,
+          result.title
+        );
+
+        if (recovered) {
+          setDocuments((prev) =>
+            prev.map((d) =>
+              d.id === id
+                ? {
+                    ...d,
+                    content: recovered,
+                    prefetchedText: result.prefetchedText,
+                    category: d.category ?? result.category,
+                  }
+                : d
+            )
+          );
+          await analyzeDoc(id, recovered, result.title, result.type);
+          void embedDoc(id, recovered, result.title);
+          toast(`Used cached preview for "${result.title}"`, "info");
+          return;
+        }
+
         const message = err instanceof Error ? err.message : "Fetch failed";
         setDocuments((prev) =>
           prev.map((d) =>
@@ -318,6 +351,7 @@ export default function Home() {
           title: doc.title,
           category: doc.category,
           prefetchedText: doc.prefetchedText,
+          description: doc.summary ?? doc.title,
         });
         return;
       }
