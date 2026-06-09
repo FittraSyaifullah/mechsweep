@@ -106,20 +106,20 @@ export function buildExaExcludeDomains(excludeUrls: string[] = []): string[] {
 }
 
 export function buildExaContentsOptions(numResults: number): Record<string, unknown> {
-  const includeFullText = exaIncludesFullText(numResults);
-  const highlightBudget = resolveExaTextMaxCharacters(numResults);
+  const highlightBudget = Math.min(1500, resolveExaTextMaxCharacters(numResults));
+  const fullContents = process.env.EXA_FULL_CONTENTS?.trim().toLowerCase() === "true";
 
-  if (includeFullText) {
+  if (fullContents && exaIncludesFullText(numResults)) {
     return {
       highlights: true,
       summary: true,
-      text: { maxCharacters: highlightBudget },
+      text: { maxCharacters: resolveExaTextMaxCharacters(numResults) },
     };
   }
 
+  // Lightweight: highlights only (no summary LLM pass) — fits Vercel Hobby timeouts.
   return {
-    highlights: true,
-    summary: true,
+    highlights: { maxCharacters: highlightBudget },
   };
 }
 
@@ -146,12 +146,16 @@ export function resolveExaAdditionalQueries(userQuery: string): string[] | undef
   ].slice(0, 3);
 }
 
-/** Deep modes are slower — keep batches smaller unless overridden. */
+/** Batch size tuned to search type and serverless timeout budget. */
 export function resolveEffectiveExaBatchSize(): number {
   const configured = resolveSweepBatchSize();
   const searchType = resolveExaSearchType();
+
   if (searchType.startsWith("deep")) {
-    return Math.min(configured, Number(process.env.EXA_DEEP_BATCH_SIZE ?? 25));
+    return Math.min(configured, Number(process.env.EXA_DEEP_BATCH_SIZE ?? 10));
+  }
+  if (searchType === "auto") {
+    return Math.min(configured, Number(process.env.EXA_AUTO_BATCH_SIZE ?? 15));
   }
   return configured;
 }

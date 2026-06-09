@@ -1,0 +1,10 @@
+{
+  "functions": {
+    "src/app/api/sweep/route.ts": {
+      "maxDuration": 60
+    },
+    "src/app/api/search-status/route.ts": {
+      "maxDuration": 30
+    }
+  }
+}

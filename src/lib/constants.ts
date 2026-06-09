@@ -13,8 +13,11 @@ export const MAX_SWEEP_RESULTS = 100;
 /** Minimum sweep results per request. */
 export const MIN_SWEEP_RESULTS = 1;
 
-/** Default Exa search mode — auto picks best latency/quality per query. */
-export const DEFAULT_EXA_SEARCH_TYPE = "auto";
+/** Default Exa search mode — fast is reliable on Vercel Hobby (~10s limit). Use auto via env for quality. */
+export const DEFAULT_EXA_SEARCH_TYPE = "fast";
+
+/** Server-side max wait for one Exa call (must stay under Vercel function limit). */
+export const SWEEP_SERVER_TIMEOUT_MS = 9_000;
 
 /** Prepended to user sweep queries for mechanical-engineering focus. */
 export const EXA_MECHANICAL_QUERY_PREFIX =
@@ -33,10 +36,10 @@ export const SWEEP_PREFETCH_MAX_CHARS = 1_200;
 export const SWEEP_MAX_EXCLUDE_URLS = 600;
 
 /** Default unique results collected in one full sweep (batched Exa calls). */
-export const DEFAULT_SWEEP_SESSION_MAX = 500;
+export const DEFAULT_SWEEP_SESSION_MAX = 200;
 
-/** Results fetched per batched /api/sweep call. */
-export const SWEEP_BATCH_SIZE = 50;
+/** Results per batched /api/sweep call (keep low for Vercel Hobby 10s limit). */
+export const SWEEP_BATCH_SIZE = 20;
 
 /** Max batched Exa calls in one full sweep. */
 export const SWEEP_MAX_BATCHES = 10;

@@ -23,7 +23,7 @@ import type { DocType, SweepResult } from "@/types";
 
 const VALIDATE_TIMEOUT_MS = 12000;
 const VALIDATE_CONCURRENCY = 20;
-export const maxDuration = 60;
+export const maxDuration = 10;
 const MAX_FETCH_BYTES = 15 * 1024 * 1024;
 const DEFAULT_MISTRAL_SEARCH_MODEL = "mistral-small-latest";
 const DEFAULT_OPENROUTER_SEARCH_MODEL = "perplexity/sonar-pro";

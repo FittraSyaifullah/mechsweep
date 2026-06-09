@@ -29,7 +29,7 @@ describe("mergeSweepResults", () => {
 });
 
 describe("sweepBatchCount", () => {
-  it("plans ten batches for 500 results at size 50", () => {
+  it("plans ten batches for 200 results at size 20", () => {
     expect(sweepBatchCount(DEFAULT_SWEEP_SESSION_MAX, SWEEP_BATCH_SIZE)).toBe(10);
   });
 

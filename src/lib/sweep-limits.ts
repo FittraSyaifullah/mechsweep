@@ -7,6 +7,7 @@ import {
   MIN_SWEEP_RESULTS,
   SWEEP_BATCH_SIZE,
   SWEEP_MAX_BATCHES,
+  SWEEP_SERVER_TIMEOUT_MS,
 } from "@/lib/constants";
 
 export function resolveSweepMaxResults(override?: number): number {
@@ -91,19 +92,28 @@ export function exaIncludesFullText(numResults: number): boolean {
   return numResults < resolveSweepBatchSize();
 }
 
-/** Scale Exa fetch timeout with batch size and search mode. */
+/** Scale Exa fetch timeout — capped for Vercel serverless (Hobby ≈10s). */
 export function resolveExaRequestTimeoutMs(
   numResults: number,
-  searchType = "auto"
+  searchType = "fast"
 ): number {
+  const platformCap = Number(process.env.SWEEP_SERVER_TIMEOUT_MS ?? SWEEP_SERVER_TIMEOUT_MS);
+  const safeCap = Number.isFinite(platformCap) ? platformCap : SWEEP_SERVER_TIMEOUT_MS;
+
   const base =
     searchType === "deep-reasoning"
       ? 55_000
       : searchType.startsWith("deep")
         ? 45_000
         : searchType === "auto"
-          ? 35_000
-          : 22_000;
+          ? 12_000
+          : searchType === "fast"
+            ? 9_000
+            : 8_000;
 
-  return Math.min(base, 8_000 + Math.max(numResults, 1) * 600);
+  return Math.min(safeCap, base, 8_000 + Math.max(numResults, 1) * 350);
+}
+
+export function resolveSweepServerTimeoutMs(): number {
+  return resolveExaRequestTimeoutMs(resolveSweepBatchSize(), "fast");
 }

@@ -46,11 +46,11 @@ describe("resolveSweepMaxResults", () => {
 });
 
 describe("sweep session limits", () => {
-  it("defaults to 500 results across batched Exa calls", () => {
+  it("defaults to 200 results across batched Exa calls", () => {
     expect(resolveSweepSessionMax()).toBe(DEFAULT_SWEEP_SESSION_MAX);
   });
 
-  it("plans ten batches for a full session at batch size 50", () => {
+  it("plans ten batches for a full session at batch size 20", () => {
     expect(sweepBatchCount(DEFAULT_SWEEP_SESSION_MAX, SWEEP_BATCH_SIZE)).toBe(10);
   });
 });
@@ -62,12 +62,15 @@ describe("Exa sweep payload limits", () => {
   });
 
   it("skips full page text for batch-sized sweeps", () => {
-    expect(exaIncludesFullText(49)).toBe(true);
-    expect(exaIncludesFullText(50)).toBe(false);
+    expect(exaIncludesFullText(19)).toBe(true);
+    expect(exaIncludesFullText(20)).toBe(false);
   });
 
   it("scales Exa timeout with batch size and search type", () => {
-    expect(resolveExaRequestTimeoutMs(50, "auto")).toBeLessThanOrEqual(35_000);
+    expect(resolveExaRequestTimeoutMs(50, "auto")).toBeLessThanOrEqual(12_000);
+    expect(resolveExaRequestTimeoutMs(20, "fast")).toBeLessThanOrEqual(9_000);
+    process.env.SWEEP_SERVER_TIMEOUT_MS = "60000";
     expect(resolveExaRequestTimeoutMs(50, "deep")).toBeGreaterThan(20_000);
+    delete process.env.SWEEP_SERVER_TIMEOUT_MS;
   });
 });

@@ -3,7 +3,7 @@ import {
   SWEEP_BATCH_SIZE,
   SWEEP_MAX_EXCLUDE_URLS,
 } from "@/lib/constants";
-import { fetchJson } from "@/lib/fetch-json";
+import { fetchJson, ApiResponseError } from "@/lib/fetch-json";
 import { resolveSweepSessionMax, sweepBatchCount } from "@/lib/sweep-limits";
 import type { SweepResult } from "@/types";
 
@@ -69,27 +69,38 @@ export function mergeSweepResults(
   return merged;
 }
 
+const CLIENT_SWEEP_TIMEOUT_MS = 120_000;
+
 export async function fetchSweepBatch(
   query: string,
   excludeUrls: string[],
   batchSize: number
 ): Promise<SweepBatchResponse & { ok: boolean; status: number }> {
-  const { response, data } = await fetchJson<SweepBatchResponse>("/api/sweep", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      query: query || undefined,
-      excludeUrls,
-      maxResults: batchSize,
-    }),
-  });
+  try {
+    const { response, data } = await fetchJson<SweepBatchResponse>("/api/sweep", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        query: query || undefined,
+        excludeUrls,
+        maxResults: batchSize,
+      }),
+      signal: AbortSignal.timeout(CLIENT_SWEEP_TIMEOUT_MS),
+    });
 
-  return {
-    ok: response.ok,
-    status: response.status,
-    ...data,
-    results: data.results ?? [],
-  };
+    return {
+      ok: response.ok,
+      status: response.status,
+      ...data,
+      results: data.results ?? [],
+    };
+  } catch (error) {
+    if (error instanceof ApiResponseError) throw error;
+    if (error instanceof DOMException && error.name === "TimeoutError") {
+      throw new Error("Sweep request timed out waiting for the server. Retry or use a narrower query.");
+    }
+    throw error;
+  }
 }
 
 export async function runBatchedSweep(options: BatchedSweepOptions): Promise<BatchedSweepResult> {

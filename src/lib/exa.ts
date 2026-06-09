@@ -72,7 +72,7 @@ export async function searchExa(
   } catch (error) {
     if (error instanceof DOMException && error.name === "TimeoutError") {
       throw new Error(
-        `Exa search timed out after ${Math.round(requestTimeoutMs / 1000)}s (${profile.searchType}). Retry or use EXA_SEARCH_TYPE=fast.`
+        `Exa search timed out after ${Math.round(requestTimeoutMs / 1000)}s. Use EXA_SEARCH_TYPE=fast and SWEEP_BATCH_SIZE=20 on Vercel Hobby.`
       );
     }
     throw error;
