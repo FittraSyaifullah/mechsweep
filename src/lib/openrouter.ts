@@ -13,7 +13,7 @@ interface OpenRouterOptions {
 }
 
 export async function callOpenRouter(options: OpenRouterOptions): Promise<string> {
-  const apiKey = process.env.OPENROUTER_API_KEY;
+  const apiKey = process.env.OPENROUTER_API_KEY?.trim();
   const baseUrl = process.env.OPENROUTER_BASE_URL ?? "https://openrouter.ai/api/v1";
   const model =
     options.model ??
@@ -60,7 +60,7 @@ export async function callOpenRouter(options: OpenRouterOptions): Promise<string
 }
 
 export async function callOpenRouterEmbedding(input: string): Promise<number[]> {
-  const apiKey = process.env.OPENROUTER_API_KEY;
+  const apiKey = process.env.OPENROUTER_API_KEY?.trim();
   const baseUrl = process.env.OPENROUTER_BASE_URL ?? "https://openrouter.ai/api/v1";
   const model = process.env.OPENROUTER_EMBEDDING_MODEL ?? "openai/text-embedding-3-small";
 
