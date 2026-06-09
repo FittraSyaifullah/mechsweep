@@ -14,17 +14,20 @@ const MAX_FETCH_BYTES = 15 * 1024 * 1024;
 const DEFAULT_MISTRAL_SEARCH_MODEL = "mistral-small-latest";
 const DEFAULT_OPENROUTER_SEARCH_MODEL = "perplexity/sonar-pro";
 
-const SWEEP_SYSTEM_PROMPT = `You are a mechanical engineering research agent. Find 20-30 real, publicly accessible mechanical engineering documents (PDFs, technical reports, datasheets, textbooks, standards summaries, or CSV datasets) relevant to the user's query.
+const SWEEP_SYSTEM_PROMPT = `You are a mechanical engineering research agent. Find 12-16 real, publicly accessible mechanical engineering documents (PDFs, technical reports, datasheets, textbooks, standards summaries, or CSV datasets) relevant to the user's query.
 
-Return ONLY a valid JSON array — no markdown, no preamble, no explanation. Each element must have:
+Return ONLY valid JSON with this shape — no markdown, no preamble:
+{"results":[{"title":"...","url":"https://...","type":"pdf|txt|csv","description":"1-2 sentences","relevanceScore":0.0,"category":"..."}]}
+
+Each result must have:
 - "title": string
-- "url": string (a real https URL, not an example, placeholder, invented URL, or citation-only title)
+- "url": string (real https URL, not placeholder or invented)
 - "type": "pdf" | "txt" | "csv"
 - "description": string (1-2 sentences)
 - "relevanceScore": number (0.0 to 1.0)
 - "category": one of: Thermodynamics, Fluid Mechanics, Solid Mechanics, Materials Science, Manufacturing, Dynamics & Vibrations, Heat Transfer, Machine Design, FEA / FEM, Control Systems, Robotics, HVAC, Other
 
-Prefer authoritative sources: university course pages, NIST, NASA, manufacturer datasheets, open textbooks, and government technical archives. Do not return URLs you cannot verify as reachable.`;
+Prefer authoritative sources: university course pages, NIST, NASA, manufacturer datasheets, open textbooks, and government technical archives.`;
 
 function normalizeUrl(input: string): string | null {
   try {
@@ -111,12 +114,16 @@ export async function POST(request: NextRequest) {
         { role: "system", content: SWEEP_SYSTEM_PROMPT },
         { role: "user", content: userPrompt },
       ],
-      maxTokens: 4000,
+      maxTokens: 3000,
       temperature: 0.2,
       timeoutMs: 55000,
+      responseFormat: { type: "json_object" },
     });
 
-    const parsed = parseJsonFromResponse<SweepResult[]>(rawText);
+    const parsedBody = parseJsonFromResponse<{ results?: SweepResult[] } | SweepResult[]>(
+      rawText
+    );
+    const parsed = Array.isArray(parsedBody) ? parsedBody : (parsedBody.results ?? []);
 
     const candidates = parsed
       .filter(
