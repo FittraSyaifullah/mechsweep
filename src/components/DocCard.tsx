@@ -42,6 +42,12 @@ const TYPE_BG: Record<MechDocument["type"], string> = {
   pdf: "bg-red-50 text-red-700",
   txt: "bg-slate-100 text-slate-700",
   csv: "bg-emerald-50 text-emerald-700",
+  json: "bg-amber-50 text-amber-700",
+  md: "bg-indigo-50 text-indigo-700",
+  zip: "bg-violet-50 text-violet-700",
+  stl: "bg-cyan-50 text-cyan-700",
+  step: "bg-sky-50 text-sky-700",
+  dwg: "bg-orange-50 text-orange-700",
 };
 
 function formatDate(value: string): string {

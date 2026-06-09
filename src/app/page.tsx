@@ -11,6 +11,12 @@ import { useToast } from "@/components/Toast";
 import UploadZone, { type UploadedFile } from "@/components/UploadZone";
 import ConfirmDialog from "@/components/ui/ConfirmDialog";
 import { Spinner } from "@/components/ui/Icons";
+import {
+  fetchDocumentContent,
+  isUsableContent,
+  normalizeImportedContent,
+  type FetchedDocumentContent,
+} from "@/lib/document-content";
 import { findDuplicateDocument, hashContent } from "@/lib/duplicates";
 import { loadDocuments, saveDocuments } from "@/lib/storage";
 import type { AnalyzeResult, MechDocument, SweepResult } from "@/types";
@@ -193,68 +199,46 @@ export default function Home() {
       );
 
       try {
-        let content = result.prefetchedText?.trim() ?? "";
-        let fetchData: {
-          type?: SweepResult["type"];
-          sizeBytes?: number;
-          pageCount?: number;
-          pages?: MechDocument["pages"];
-          tables?: MechDocument["tables"];
-          detectedLanguage?: string;
-          detectedUnits?: string[];
-          ocrStatus?: MechDocument["ocrStatus"];
-          rowCount?: number;
-        } = {};
+        const prefetched = result.prefetchedText
+          ? normalizeImportedContent(result.prefetchedText)
+          : "";
+        let fetchData: FetchedDocumentContent = { text: "" };
+        let content = isUsableContent(prefetched) ? prefetched : "";
 
         if (!content) {
-          const res = await fetch("/api/fetch-url", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ url: result.url, type: result.type }),
-          });
-          const data = (await res.json()) as {
-            text?: string;
-            type?: SweepResult["type"];
-            sizeBytes?: number;
-            pageCount?: number;
-            pages?: MechDocument["pages"];
-            tables?: MechDocument["tables"];
-            detectedLanguage?: string;
-            detectedUnits?: string[];
-            ocrStatus?: MechDocument["ocrStatus"];
-            rowCount?: number;
-            error?: string;
-          };
-          if (!res.ok) throw new Error(data.error ?? "Fetch failed");
-          content = data.text ?? "";
-          fetchData = data;
+          fetchData = await fetchDocumentContent(
+            result.url,
+            result.type,
+            result.prefetchedText
+          );
+          content = fetchData.text;
         }
 
-        if (!content.trim()) {
-          throw new Error("Fetched URL but no readable text was found");
-        }
-
+        const docType = fetchData.type ?? result.type;
         const contentHash = await hashContent(content);
-        const duplicate = findDuplicateDocument(
-          documents.filter((doc) => doc.id !== id),
-          { contentHash }
-        );
+        let skippedDuplicate = false;
 
-        if (duplicate) {
-          setDocuments((prev) => prev.filter((doc) => doc.id !== id));
-          toast(`Skipped duplicate: ${duplicate.title}`, "info");
-          return;
-        }
+        setDocuments((prev) => {
+          const duplicate = findDuplicateDocument(
+            prev.filter((doc) => doc.id !== id),
+            { contentHash, url: result.url }
+          );
 
-        setDocuments((prev) =>
-          prev.map((d) =>
+          if (duplicate) {
+            skippedDuplicate = true;
+            toast(`Skipped duplicate: ${duplicate.title}`, "info");
+            return prev.filter((doc) => doc.id !== id);
+          }
+
+          return prev.map((d) =>
             d.id === id
               ? {
                   ...d,
-                  type: fetchData.type ?? d.type,
+                  type: docType,
                   content,
                   contentHash,
                   prefetchedText: result.prefetchedText,
+                  category: d.category ?? result.category,
                   sizeBytes: fetchData.sizeBytes,
                   pageCount: fetchData.pageCount,
                   pages: fetchData.pages,
@@ -265,10 +249,12 @@ export default function Home() {
                   rowCount: fetchData.rowCount,
                 }
               : d
-          )
-        );
+          );
+        });
 
-        void analyzeDoc(id, content, result.title, result.type);
+        if (skippedDuplicate) return;
+
+        await analyzeDoc(id, content, result.title, docType);
         void embedDoc(id, content, result.title);
       } catch (err) {
         const message = err instanceof Error ? err.message : "Fetch failed";
@@ -280,7 +266,7 @@ export default function Home() {
         toast(message.length > 120 ? `${message.slice(0, 117)}…` : message, "error");
       }
     },
-    [analyzeDoc, documents, embedDoc, toast]
+    [analyzeDoc, embedDoc, toast]
   );
 
   const addFromSweep = useCallback(
@@ -315,6 +301,17 @@ export default function Home() {
   const retryDoc = useCallback(
     (doc: MechDocument) => {
       if (doc.source === "sweep" && doc.url) {
+        if (doc.content?.trim() && doc.status === "error") {
+          setDocuments((prev) =>
+            prev.map((d) =>
+              d.id === doc.id ? { ...d, status: "processing" as const, error: undefined } : d
+            )
+          );
+          void analyzeDoc(doc.id, doc.content, doc.title, doc.type);
+          void embedDoc(doc.id, doc.content, doc.title);
+          return;
+        }
+
         void fetchAndAnalyze(doc.id, {
           url: doc.url,
           type: doc.type,
@@ -322,16 +319,20 @@ export default function Home() {
           category: doc.category,
           prefetchedText: doc.prefetchedText,
         });
-      } else if (doc.content) {
+        return;
+      }
+
+      if (doc.content) {
         setDocuments((prev) =>
           prev.map((d) =>
             d.id === doc.id ? { ...d, status: "processing" as const, error: undefined } : d
           )
         );
         void analyzeDoc(doc.id, doc.content, doc.title, doc.type);
+        void embedDoc(doc.id, doc.content, doc.title);
       }
     },
-    [analyzeDoc, fetchAndAnalyze]
+    [analyzeDoc, embedDoc, fetchAndAnalyze]
   );
 
   function removeDoc(id: string) {

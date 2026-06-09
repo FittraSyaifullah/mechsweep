@@ -1,27 +1,26 @@
 import { NextRequest, NextResponse } from "next/server";
 import {
-  detectDocTypeFromContentType,
-  detectDocTypeFromUrl,
-  extractTextFromCsv,
-  extractTextFromHtml,
-  extractTextFromTxt,
-} from "@/lib/parser";
-import { parsePdfWithPages } from "@/lib/pdf";
-import {
-  detectLanguage,
-  detectOcrStatus,
-  detectUnits,
-  extractTablesFromCsv as extractCsvTables,
-  extractTablesFromHtml,
-  extractTablesFromText,
-} from "@/lib/processing";
+  isUsableContent,
+  normalizeImportedContent,
+} from "@/lib/document-content";
+import { extractDocumentText } from "@/lib/document-extract";
 import {
   DEFAULT_FETCH_TIMEOUT_MS,
-  decodeBufferText,
   fetchDocumentBuffer,
   inferContentKind,
   isPdfBuffer,
+  isZipBuffer,
 } from "@/lib/fetch-document";
+import { docTypeFromExtension } from "@/lib/file-types";
+import {
+  detectDocTypeFromContentType,
+  detectDocTypeFromUrl,
+} from "@/lib/parser";
+import {
+  detectLanguage,
+  detectUnits,
+  extractTablesFromHtml,
+} from "@/lib/processing";
 import {
   failedStatusMessage,
   fetchExceptionMessage,
@@ -40,14 +39,63 @@ function normalizeUrl(input: string): string {
   return new URL(withProtocol).toString();
 }
 
+function fallbackPayload(
+  fallbackText: string | undefined,
+  type: DocType,
+  finalUrl: string
+) {
+  const text = fallbackText ? normalizeImportedContent(fallbackText) : "";
+  if (!isUsableContent(text)) return null;
+
+  return {
+    text,
+    type,
+    detectedLanguage: detectLanguage(text),
+    detectedUnits: detectUnits(text),
+    ocrStatus: "not_needed" as const,
+    sourceUrl: finalUrl,
+    fromFallback: true,
+  };
+}
+
+function resolveDocType(
+  finalUrl: string,
+  contentType: string | null,
+  buffer: Buffer,
+  requestedType: DocType,
+  kind: ReturnType<typeof inferContentKind>
+): DocType {
+  if (isPdfBuffer(buffer) || kind === "pdf") return "pdf";
+  if (isZipBuffer(buffer)) return "zip";
+
+  const fromUrl = docTypeFromExtension(finalUrl);
+  if (fromUrl) return fromUrl;
+
+  if (kind === "csv") return "csv";
+
+  const fromContentType = detectDocTypeFromContentType(contentType, requestedType);
+  if (fromContentType !== "txt" || kind !== "html") return fromContentType;
+
+  return requestedType ?? detectDocTypeFromUrl(finalUrl);
+}
+
 export async function POST(request: NextRequest) {
   let url: string | undefined;
+  let fallbackText: string | undefined;
+  let requestedType: DocType = "pdf";
   try {
-    const body = (await request.json()) as { url: string; type: DocType };
+    const body = (await request.json()) as {
+      url: string;
+      type: DocType;
+      fallbackText?: string;
+    };
 
     if (!body.url) {
       return NextResponse.json({ error: "url is required" }, { status: 400 });
     }
+
+    fallbackText = body.fallbackText;
+    requestedType = body.type ?? "pdf";
 
     try {
       url = normalizeUrl(body.url);
@@ -63,6 +111,9 @@ export async function POST(request: NextRequest) {
     });
 
     if (buffer.length > MAX_FETCH_BYTES) {
+      const oversizedFallback = fallbackPayload(fallbackText, requestedType, finalUrl);
+      if (oversizedFallback) return NextResponse.json(oversizedFallback);
+
       return NextResponse.json(
         { error: oversizedDocumentMessage(buffer.length) },
         { status: 413 }
@@ -71,74 +122,48 @@ export async function POST(request: NextRequest) {
 
     const kind = inferContentKind(contentType, finalUrl, buffer);
     if (kind === "unknown" && !isSupportedContentType(contentType, finalUrl)) {
+      const unsupportedFallback = fallbackPayload(fallbackText, requestedType, finalUrl);
+      if (unsupportedFallback) return NextResponse.json(unsupportedFallback);
+
       return NextResponse.json(
         { error: unsupportedContentTypeMessage(contentType, finalUrl) },
         { status: 415 }
       );
     }
 
-    const fallbackType = body.type ?? detectDocTypeFromUrl(finalUrl);
-    const type =
-      kind === "pdf"
-        ? "pdf"
-        : kind === "csv"
-          ? "csv"
-          : detectDocTypeFromContentType(contentType, fallbackType);
+    const type = resolveDocType(finalUrl, contentType, buffer, requestedType, kind);
+    const extracted = await extractDocumentText(type, buffer, finalUrl);
 
-    if (type === "pdf" || isPdfBuffer(buffer)) {
-      const data = await parsePdfWithPages(buffer);
-      const tables = extractTablesFromText(data.text);
+    if (!extracted.text.trim()) {
+      const emptyFallback = fallbackPayload(fallbackText, type, finalUrl);
+      if (emptyFallback) return NextResponse.json(emptyFallback);
 
-      return NextResponse.json({
-        text: data.text,
-        type: "pdf" as const,
-        sizeBytes: buffer.length,
-        pageCount: data.pageCount,
-        pages: data.pages,
-        tables,
-        detectedLanguage: detectLanguage(data.text),
-        detectedUnits: detectUnits(data.text),
-        ocrStatus: detectOcrStatus(data.text, data.pageCount),
-      });
-    }
-
-    const text = decodeBufferText(buffer);
-    const sizeBytes = buffer.length;
-
-    if (type === "csv" || kind === "csv") {
-      const { text: csvText, rowCount } = extractTextFromCsv(text);
-      return NextResponse.json({
-        text: csvText,
-        type: "csv" as const,
-        sizeBytes,
-        rowCount,
-        tables: extractCsvTables(text),
-        detectedLanguage: detectLanguage(csvText),
-        detectedUnits: detectUnits(csvText),
-        ocrStatus: "not_needed",
-      });
-    }
-
-    const isHtml = kind === "html" || contentType?.toLowerCase().includes("html");
-    const extractedText = isHtml ? extractTextFromHtml(text) : extractTextFromTxt(text);
-
-    if (!extractedText) {
       return NextResponse.json(
         { error: `Fetched URL but could not extract text: ${finalUrl}` },
         { status: 422 }
       );
     }
 
+    const isHtml = kind === "html" || contentType?.toLowerCase().includes("html");
+
     return NextResponse.json({
-      text: extractedText,
+      text: extracted.text,
       type,
-      sizeBytes,
-      tables: isHtml ? extractTablesFromHtml(text) : extractTablesFromText(extractedText),
-      detectedLanguage: detectLanguage(extractedText),
-      detectedUnits: detectUnits(extractedText),
-      ocrStatus: "not_needed",
+      sizeBytes: buffer.length,
+      pageCount: extracted.pageCount,
+      pages: extracted.pages,
+      tables:
+        extracted.tables ??
+        (isHtml ? extractTablesFromHtml(buffer.toString("utf8")) : undefined),
+      detectedLanguage: extracted.detectedLanguage,
+      detectedUnits: extracted.detectedUnits,
+      ocrStatus: extracted.ocrStatus,
+      rowCount: extracted.rowCount,
     });
   } catch (error) {
+    const fallback = fallbackPayload(fallbackText, requestedType, url ?? "");
+    if (fallback) return NextResponse.json(fallback);
+
     if (error instanceof Error && /^Fetch failed \(\d+\)$/.test(error.message)) {
       const status = Number(error.message.match(/\d+/)?.[0] ?? 502);
       return NextResponse.json(

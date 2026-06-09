@@ -2,6 +2,7 @@
 
 import { useDeferredValue, useEffect, useMemo, useState } from "react";
 import DocCard from "@/components/DocCard";
+import { DOC_TYPES, docTypeLabel } from "@/lib/file-types";
 import type { DocSource, DocStatus, DocType, MechDocument } from "@/types";
 
 interface DocLibraryProps {
@@ -327,9 +328,11 @@ export default function DocLibrary({
           className="select-base"
         >
           <option value="all">All types</option>
-          <option value="pdf">PDF</option>
-          <option value="txt">TXT</option>
-          <option value="csv">CSV</option>
+          {DOC_TYPES.map((type) => (
+            <option key={type} value={type}>
+              {docTypeLabel(type)}
+            </option>
+          ))}
         </select>
         <select
           value={sortBy}

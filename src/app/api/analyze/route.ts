@@ -54,6 +54,9 @@ export async function POST(request: NextRequest) {
     });
 
     const result = parseJsonFromResponse<AnalyzeResult>(rawText);
+    if (!result.summary && !result.tags?.length && !result.category) {
+      throw new Error("Analysis returned empty structured data");
+    }
 
     return NextResponse.json({
       summary: result.summary ?? "",
@@ -63,7 +66,12 @@ export async function POST(request: NextRequest) {
       provider,
     });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Analysis failed";
+    const message =
+      error instanceof SyntaxError
+        ? "Analysis returned invalid JSON"
+        : error instanceof Error
+          ? error.message
+          : "Analysis failed";
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }

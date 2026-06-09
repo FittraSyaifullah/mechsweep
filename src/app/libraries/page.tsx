@@ -9,6 +9,11 @@ import DocLibrary from "@/components/DocLibrary";
 import ExportModal from "@/components/ExportModal";
 import { Spinner } from "@/components/ui/Icons";
 import { useToast } from "@/components/Toast";
+import {
+  fetchDocumentContent,
+  isUsableContent,
+  normalizeImportedContent,
+} from "@/lib/document-content";
 import { loadDocuments, saveDocuments } from "@/lib/storage";
 import type { AnalyzeResult, MechDocument } from "@/types";
 
@@ -131,9 +136,77 @@ export default function LibrariesPage() {
     toast(`Deleted ${ids.length} doc${ids.length !== 1 ? "s" : ""}`, "info");
   }
 
+  const retryDoc = useCallback(
+    async (doc: MechDocument) => {
+      if (doc.source === "sweep" && doc.url) {
+        if (doc.content?.trim() && doc.status === "error") {
+          void analyzeDoc(doc);
+          return;
+        }
+
+        setDocuments((prev) =>
+          prev.map((item) =>
+            item.id === doc.id
+              ? { ...item, status: "processing" as const, error: undefined, content: "" }
+              : item
+          )
+        );
+
+        try {
+          const prefetched = doc.prefetchedText
+            ? normalizeImportedContent(doc.prefetchedText)
+            : "";
+          let content = isUsableContent(prefetched) ? prefetched : "";
+          let fetchData: Awaited<ReturnType<typeof fetchDocumentContent>> | null = null;
+
+          if (!content) {
+            fetchData = await fetchDocumentContent(doc.url, doc.type, doc.prefetchedText);
+            content = fetchData.text;
+          }
+
+          const docType = fetchData?.type ?? doc.type;
+
+          setDocuments((prev) =>
+            prev.map((item) =>
+              item.id === doc.id
+                ? {
+                    ...item,
+                    type: docType,
+                    content,
+                    sizeBytes: fetchData?.sizeBytes ?? item.sizeBytes,
+                    pageCount: fetchData?.pageCount ?? item.pageCount,
+                    pages: fetchData?.pages ?? item.pages,
+                    tables: fetchData?.tables ?? item.tables,
+                    detectedLanguage: fetchData?.detectedLanguage ?? item.detectedLanguage,
+                    detectedUnits: fetchData?.detectedUnits ?? item.detectedUnits,
+                    ocrStatus: fetchData?.ocrStatus ?? item.ocrStatus,
+                    rowCount: fetchData?.rowCount ?? item.rowCount,
+                  }
+                : item
+            )
+          );
+
+          await analyzeDoc({ ...doc, content, type: docType });
+        } catch (err) {
+          const message = err instanceof Error ? err.message : "Fetch failed";
+          setDocuments((prev) =>
+            prev.map((item) =>
+              item.id === doc.id ? { ...item, status: "error" as const, error: message } : item
+            )
+          );
+          toast(message.length > 120 ? `${message.slice(0, 117)}…` : message, "error");
+        }
+        return;
+      }
+
+      if (doc.content) void analyzeDoc(doc);
+    },
+    [analyzeDoc, toast]
+  );
+
   function bulkRetry(docs: MechDocument[]) {
-    for (const doc of docs) void analyzeDoc(doc);
-    toast(`Re-analyzing ${docs.length} doc${docs.length !== 1 ? "s" : ""}`, "info");
+    for (const doc of docs) void retryDoc(doc);
+    toast(`Retrying ${docs.length} doc${docs.length !== 1 ? "s" : ""}`, "info");
   }
 
   const readyCount = documents.filter((doc) => doc.status === "ready").length;
@@ -177,9 +250,7 @@ export default function LibrariesPage() {
           documents={documents}
           onRemove={removeDoc}
           onSelect={selectDoc}
-          onRetry={() => {
-            toast("Retry from the main page after re-adding or re-uploading the document.", "info");
-          }}
+          onRetry={retryDoc}
           onExport={(doc) => setExportDocs([doc])}
           onBulkExport={setExportDocs}
           onBulkDelete={bulkDelete}

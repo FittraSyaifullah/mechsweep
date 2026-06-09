@@ -1,3 +1,5 @@
+import type { DocType } from "@/types";
+
 interface IconProps {
   className?: string;
 }
@@ -142,7 +144,7 @@ export function ListIcon({ className = "h-4 w-4" }: IconProps) {
   );
 }
 
-export function DocTypeIcon({ type, className = "h-5 w-5" }: IconProps & { type: "pdf" | "txt" | "csv" }) {
+export function DocTypeIcon({ type, className = "h-5 w-5" }: IconProps & { type: DocType }) {
   if (type === "pdf") return <FilePdfIcon className={className} />;
   if (type === "csv") return <FileCsvIcon className={className} />;
   return <FileTextIcon className={className} />;

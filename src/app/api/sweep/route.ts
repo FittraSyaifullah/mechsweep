@@ -5,8 +5,10 @@ import { fetchRemoteUrl } from "@/lib/fetch-document";
 import {
   detectDocTypeFromContentType,
   detectDocTypeFromUrl,
+  normalizeDocType,
   parseJsonFromResponse,
 } from "@/lib/parser";
+import { SWEEP_TYPE_HINT } from "@/lib/file-types";
 import type { DocType, SweepResult } from "@/types";
 
 const VALIDATE_TIMEOUT_MS = 12000;
@@ -20,11 +22,11 @@ const DEFAULT_OPENROUTER_SEARCH_MODEL = "perplexity/sonar-pro";
 const SWEEP_SYSTEM_PROMPT = `You are a mechanical engineering research agent. Find 20-24 real, publicly accessible mechanical engineering documents relevant to the user's query.
 
 Return ONLY valid JSON with this shape:
-{"results":[{"title":"...","url":"https://...","type":"pdf|txt|csv","description":"1 sentence","relevanceScore":0.0,"category":"..."}]}
+{"results":[{"title":"...","url":"https://...","type":"${SWEEP_TYPE_HINT}","description":"1 sentence","relevanceScore":0.0,"category":"..."}]}
 
-Each result needs title, real https url, type (pdf|txt|csv), description, relevanceScore (0-1), and category from: Thermodynamics, Fluid Mechanics, Solid Mechanics, Materials Science, Manufacturing, Dynamics & Vibrations, Heat Transfer, Machine Design, FEA / FEM, Control Systems, Robotics, HVAC, Other.
+Each result needs title, real https url, type (${SWEEP_TYPE_HINT}), description, relevanceScore (0-1), and category from: Thermodynamics, Fluid Mechanics, Solid Mechanics, Materials Science, Manufacturing, Dynamics & Vibrations, Heat Transfer, Machine Design, FEA / FEM, Control Systems, Robotics, HVAC, Other.
 
-Prefer university pages, NIST, NASA, manufacturer datasheets, and open textbooks. Include diverse sources.`;
+Prefer PDFs, datasheets, CAD (STL/STEP/DWG), standards, JSON/CSV datasets, markdown notes, and open textbooks. Include zip archives when they contain engineering documents.`;
 
 function normalizeUrl(input: string): string | null {
   try {
@@ -36,9 +38,8 @@ function normalizeUrl(input: string): string | null {
   }
 }
 
-function normalizeDocType(type: string, url: string): DocType {
-  if (type === "pdf" || type === "txt" || type === "csv") return type;
-  return detectDocTypeFromUrl(url);
+function normalizeDocTypeValue(type: string, url: string): DocType {
+  return normalizeDocType(type, url);
 }
 
 function getValidatedSize(response: Response): number | null {
@@ -69,7 +70,7 @@ async function validateSweepResult(result: SweepResult): Promise<SweepResult | n
     if (responseSize && responseSize > MAX_FETCH_BYTES) return null;
 
     const finalUrl = response.url || url;
-    const fallbackType = normalizeDocType(result.type, finalUrl);
+    const fallbackType = normalizeDocTypeValue(result.type, finalUrl);
     const type = detectDocTypeFromContentType(
       response.headers.get("content-type"),
       fallbackType
@@ -142,7 +143,7 @@ async function searchWithMistral(query: string, excluded: string[]): Promise<Swe
       return {
         ...r,
         url,
-        type: normalizeDocType(r.type, url),
+        type: normalizeDocTypeValue(r.type, url),
       };
     })
     .filter((r): r is SweepResult => r !== null)

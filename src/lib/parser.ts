@@ -1,20 +1,13 @@
 import { parse as parseCsv } from "csv-parse/sync";
+import { docTypeFromExtension, isDocType } from "@/lib/file-types";
 import type { DocType } from "@/types";
 
 export function detectDocType(filename: string): DocType | null {
-  const ext = filename.split(".").pop()?.toLowerCase();
-  if (ext === "pdf") return "pdf";
-  if (ext === "txt") return "txt";
-  if (ext === "csv") return "csv";
-  return null;
+  return docTypeFromExtension(filename);
 }
 
 export function detectDocTypeFromUrl(url: string): DocType {
-  const lower = url.toLowerCase();
-  const pathname = lower.split("?")[0].split("#")[0];
-  if (pathname.endsWith(".pdf")) return "pdf";
-  if (pathname.endsWith(".csv")) return "csv";
-  return "txt";
+  return docTypeFromExtension(url) ?? "txt";
 }
 
 export function detectDocTypeFromContentType(
@@ -24,13 +17,60 @@ export function detectDocTypeFromContentType(
   const lower = contentType?.toLowerCase() ?? "";
   if (lower.includes("application/pdf")) return "pdf";
   if (lower.includes("text/csv") || lower.includes("application/csv")) return "csv";
+  if (lower.includes("application/json") || lower.includes("+json")) return "json";
+  if (lower.includes("text/markdown")) return "md";
+  if (lower.includes("application/zip") || lower.includes("application/x-zip-compressed"))
+    return "zip";
+  if (lower.includes("model/stl") || lower.includes("application/sla")) return "stl";
+  if (lower.includes("model/step") || lower.includes("application/step")) return "step";
+  if (lower.includes("application/acad") || lower.includes("image/vnd.dwg")) return "dwg";
   if (lower.includes("text/html") || lower.includes("application/xhtml+xml")) return "txt";
   if (lower.includes("text/plain")) return "txt";
   return fallback;
 }
 
+export function normalizeDocType(type: string, url: string): DocType {
+  if (isDocType(type)) return type;
+  return detectDocTypeFromUrl(url);
+}
+
 export function extractTextFromTxt(content: string): string {
   return content.trim();
+}
+
+export function extractTextFromMd(content: string): string {
+  return content
+    .replace(/^---[\s\S]*?---\n?/, "")
+    .replace(/^#{1,6}\s+/gm, "")
+    .replace(/\*\*(.*?)\*\*/g, "$1")
+    .replace(/\*(.*?)\*/g, "$1")
+    .replace(/`([^`]+)`/g, "$1")
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
+    .trim();
+}
+
+function flattenJson(value: unknown, prefix = ""): string {
+  if (value === null || value === undefined) return "";
+  if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+    return `${prefix}${String(value)}\n`;
+  }
+  if (Array.isArray(value)) {
+    return value.map((item, index) => flattenJson(item, `${prefix}[${index}] `)).join("");
+  }
+  if (typeof value === "object") {
+    return Object.entries(value as Record<string, unknown>)
+      .map(([key, nested]) => flattenJson(nested, `${prefix}${key}: `))
+      .join("");
+  }
+  return `${prefix}${String(value)}\n`;
+}
+
+export function extractTextFromJson(content: string): string {
+  try {
+    return flattenJson(JSON.parse(content)).trim();
+  } catch {
+    return extractTextFromTxt(content);
+  }
 }
 
 export function extractTextFromHtml(html: string): string {

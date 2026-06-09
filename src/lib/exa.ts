@@ -1,4 +1,5 @@
 import { detectDocTypeFromUrl } from "@/lib/parser";
+import { buildPrefetchedContent } from "@/lib/document-content";
 import type { SweepResult } from "@/types";
 
 interface ExaSearchResult {
@@ -32,7 +33,7 @@ export function mapExaResult(result: ExaSearchResult, index: number): SweepResul
       "Mechanical engineering resource",
     relevanceScore: result.highlightScores?.[0] ?? Math.max(0.45, 1 - index * 0.02),
     category: "Other",
-    prefetchedText: result.text?.trim() || undefined,
+    prefetchedText: buildPrefetchedContent(result.text, result.highlights),
   };
 }
 
@@ -65,7 +66,7 @@ export async function searchExa(query: string, excludeUrls: string[] = []): Prom
     },
     signal: AbortSignal.timeout(30000),
     body: JSON.stringify({
-      query: `mechanical engineering documents PDF datasheets textbooks standards: ${query}`,
+      query: `mechanical engineering documents PDF datasheets CAD STL STEP DWG JSON CSV markdown zip textbooks standards: ${query}`,
       type: searchType,
       numResults,
       ...(excludedDomains.length > 0 ? { excludeDomains: excludedDomains } : {}),

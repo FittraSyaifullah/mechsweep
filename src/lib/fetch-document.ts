@@ -113,6 +113,15 @@ export function isPdfBuffer(buffer: Buffer): boolean {
   return buffer.length >= 4 && buffer.subarray(0, 4).toString("utf8") === "%PDF";
 }
 
+export function isZipBuffer(buffer: Buffer): boolean {
+  return (
+    buffer.length >= 4 &&
+    buffer[0] === 0x50 &&
+    buffer[1] === 0x4b &&
+    (buffer[2] === 0x03 || buffer[2] === 0x05 || buffer[2] === 0x07)
+  );
+}
+
 function sniffHtml(buffer: Buffer): boolean {
   const start = buffer.subarray(0, 512).toString("utf8").trim().toLowerCase();
   return start.startsWith("<!doctype html") || start.startsWith("<html") || start.startsWith("<head");
@@ -131,12 +140,19 @@ export function inferContentKind(
   if (buffer && sniffHtml(buffer)) return "html";
   if (lower.includes("application/octet-stream")) {
     if (buffer && isPdfBuffer(buffer)) return "pdf";
+    if (buffer && isZipBuffer(buffer)) return "text";
     if (/\.pdf(\?|#|$)/i.test(url)) return "pdf";
+    if (/\.zip(\?|#|$)/i.test(url)) return "text";
     if (/\.csv(\?|#|$)/i.test(url)) return "csv";
+    if (/\.(stl|step|stp|dwg)(\?|#|$)/i.test(url)) return "text";
+    if (/\.json(\?|#|$)/i.test(url)) return "text";
+    if (/\.(md|markdown)(\?|#|$)/i.test(url)) return "text";
   }
   if (/\.pdf(\?|#|$)/i.test(url)) return "pdf";
+  if (/\.zip(\?|#|$)/i.test(url)) return "text";
   if (/\.csv(\?|#|$)/i.test(url)) return "csv";
   if (/\.txt(\?|#|$)/i.test(url)) return "text";
+  if (/\.(json|md|markdown|stl|step|stp|dwg)(\?|#|$)/i.test(url)) return "text";
   return "unknown";
 }
 

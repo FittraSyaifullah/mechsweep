@@ -1,12 +1,22 @@
 "use client";
 
 import { useCallback, useRef, useState } from "react";
-import { detectDocType, extractTextFromCsv, extractTextFromTxt } from "@/lib/parser";
+import {
+  detectDocType,
+  extractTextFromCsv,
+  extractTextFromJson,
+  extractTextFromMd,
+  extractTextFromTxt,
+} from "@/lib/parser";
 import {
   detectLanguage,
   detectUnits,
   extractTablesFromCsv,
 } from "@/lib/processing";
+import {
+  SUPPORTED_TYPE_LABELS,
+  UPLOAD_ACCEPT,
+} from "@/lib/file-types";
 import type { DocType, DocumentPage, ExtractedTable, MechDocument } from "@/types";
 import { Spinner } from "@/components/ui/Icons";
 
@@ -26,6 +36,40 @@ export interface UploadedFile {
 
 interface UploadZoneProps {
   onUpload: (files: UploadedFile[]) => void | Promise<void>;
+}
+
+const SERVER_EXTRACT_TYPES = new Set<DocType>(["pdf", "zip", "stl", "step", "dwg"]);
+
+async function extractViaApi(file: File, type: DocType, endpoint: string): Promise<UploadedFile> {
+  const formData = new FormData();
+  formData.append("file", file);
+  formData.append("type", type);
+  const res = await fetch(endpoint, { method: "POST", body: formData });
+  const data = (await res.json()) as {
+    text?: string;
+    pageCount?: number;
+    pages?: DocumentPage[];
+    tables?: ExtractedTable[];
+    detectedLanguage?: string;
+    detectedUnits?: string[];
+    ocrStatus?: MechDocument["ocrStatus"];
+    rowCount?: number;
+    error?: string;
+  };
+  if (!res.ok) throw new Error(data.error ?? "File extract failed");
+  return {
+    title: file.name.replace(/\.[^.]+$/, ""),
+    type,
+    content: data.text ?? "",
+    pageCount: data.pageCount,
+    pages: data.pages,
+    tables: data.tables,
+    detectedLanguage: data.detectedLanguage,
+    detectedUnits: data.detectedUnits,
+    ocrStatus: data.ocrStatus,
+    rowCount: data.rowCount,
+    sizeBytes: file.size,
+  };
 }
 
 export default function UploadZone({ onUpload }: UploadZoneProps) {
@@ -49,34 +93,17 @@ export default function UploadZone({ onUpload }: UploadZoneProps) {
 
         try {
           if (type === "pdf") {
-            const formData = new FormData();
-            formData.append("file", file);
-            const res = await fetch("/api/parse-pdf", { method: "POST", body: formData });
-            const data = (await res.json()) as {
-              text?: string;
-              pageCount?: number;
-              pages?: DocumentPage[];
-              tables?: ExtractedTable[];
-              detectedLanguage?: string;
-              detectedUnits?: string[];
-              ocrStatus?: MechDocument["ocrStatus"];
-              error?: string;
-            };
-            if (!res.ok) throw new Error(data.error ?? "PDF parse failed");
-            uploaded.push({
-              title: file.name.replace(/\.[^.]+$/, ""),
-              type,
-              content: data.text ?? "",
-              pageCount: data.pageCount,
-              pages: data.pages,
-              tables: data.tables,
-              detectedLanguage: data.detectedLanguage,
-              detectedUnits: data.detectedUnits,
-              ocrStatus: data.ocrStatus,
-              sizeBytes: file.size,
-            });
-          } else if (type === "csv") {
-            const text = await file.text();
+            uploaded.push(await extractViaApi(file, type, "/api/parse-pdf"));
+            continue;
+          }
+
+          if (SERVER_EXTRACT_TYPES.has(type)) {
+            uploaded.push(await extractViaApi(file, type, "/api/extract-file"));
+            continue;
+          }
+
+          const text = await file.text();
+          if (type === "csv") {
             const { text: csvText, rowCount } = extractTextFromCsv(text);
             uploaded.push({
               title: file.name.replace(/\.[^.]+$/, ""),
@@ -89,8 +116,29 @@ export default function UploadZone({ onUpload }: UploadZoneProps) {
               ocrStatus: "not_needed",
               sizeBytes: file.size,
             });
+          } else if (type === "json") {
+            const content = extractTextFromJson(text);
+            uploaded.push({
+              title: file.name.replace(/\.[^.]+$/, ""),
+              type,
+              content,
+              detectedLanguage: detectLanguage(content),
+              detectedUnits: detectUnits(content),
+              ocrStatus: "not_needed",
+              sizeBytes: file.size,
+            });
+          } else if (type === "md") {
+            const content = extractTextFromMd(text);
+            uploaded.push({
+              title: file.name.replace(/\.[^.]+$/, ""),
+              type,
+              content,
+              detectedLanguage: detectLanguage(content),
+              detectedUnits: detectUnits(content),
+              ocrStatus: "not_needed",
+              sizeBytes: file.size,
+            });
           } else {
-            const text = await file.text();
             const content = extractTextFromTxt(text);
             uploaded.push({
               title: file.name.replace(/\.[^.]+$/, ""),
@@ -116,7 +164,7 @@ export default function UploadZone({ onUpload }: UploadZoneProps) {
   return (
     <div className="space-y-3">
       <p className="text-sm text-slate-600">
-        Upload PDF, TXT, or CSV files. Text is extracted and analyzed automatically.
+        Upload {SUPPORTED_TYPE_LABELS} files. Text is extracted and analyzed automatically.
       </p>
 
       <div
@@ -150,13 +198,13 @@ export default function UploadZone({ onUpload }: UploadZoneProps) {
         ) : (
           <>
             <p className="text-sm font-medium text-slate-900">Drop files here</p>
-            <p className="mt-1 text-xs text-slate-500">PDF · TXT · CSV — or click to browse</p>
+            <p className="mt-1 text-xs text-slate-500">{SUPPORTED_TYPE_LABELS} — or click to browse</p>
           </>
         )}
         <input
           ref={inputRef}
           type="file"
-          accept=".pdf,.txt,.csv"
+          accept={UPLOAD_ACCEPT}
           multiple
           onChange={(e) => {
             if (e.target.files?.length) {

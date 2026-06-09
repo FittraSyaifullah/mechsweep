@@ -1,3 +1,5 @@
+import { URL_EXTENSION_PATTERN } from "@/lib/file-types";
+
 export const MAX_FETCH_BYTES = 15 * 1024 * 1024;
 
 export function formatMegabytes(bytes: number): string {
@@ -20,7 +22,7 @@ export function failedStatusMessage(status: number, statusText: string, url: str
 export function unsupportedContentTypeMessage(contentType: string | null, url: string): string {
   return `Unsupported document type${
     contentType ? ` (${contentType})` : ""
-  }: ${url}. Use PDF, TXT, CSV, or readable HTML.`;
+  }: ${url}. Supported formats: PDF, JSON, CSV, STL, STEP, TXT, DWG, MD, ZIP, or readable HTML.`;
 }
 
 export function fetchExceptionMessage(error: unknown, url?: string): {
@@ -66,15 +68,27 @@ export function isSupportedContentType(contentType: string | null, url?: string)
   const lower = contentType.toLowerCase();
   if (lower.includes("application/octet-stream")) {
     if (!url) return true;
-    return /\.(pdf|csv|txt|html?)(\?|#|$)/i.test(url);
+    return URL_EXTENSION_PATTERN.test(url);
   }
   if (lower.includes("application/download")) return true;
   return (
     lower.includes("application/pdf") ||
     lower.includes("text/csv") ||
     lower.includes("application/csv") ||
+    lower.includes("application/json") ||
+    lower.includes("+json") ||
+    lower.includes("text/markdown") ||
+    lower.includes("application/zip") ||
+    lower.includes("application/x-zip-compressed") ||
+    lower.includes("model/stl") ||
+    lower.includes("application/sla") ||
+    lower.includes("model/step") ||
+    lower.includes("application/step") ||
+    lower.includes("application/acad") ||
+    lower.includes("image/vnd.dwg") ||
     lower.includes("text/plain") ||
     lower.includes("text/html") ||
-    lower.includes("application/xhtml+xml")
+    lower.includes("application/xhtml+xml") ||
+    (url ? URL_EXTENSION_PATTERN.test(url) : false)
   );
 }

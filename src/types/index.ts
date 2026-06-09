@@ -1,4 +1,13 @@
-export type DocType = "pdf" | "txt" | "csv";
+export type DocType =
+  | "pdf"
+  | "txt"
+  | "csv"
+  | "json"
+  | "md"
+  | "zip"
+  | "stl"
+  | "step"
+  | "dwg";
 export type DocSource = "upload" | "sweep";
 export type DocStatus = "pending" | "processing" | "ready" | "error";
 
