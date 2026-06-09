@@ -1,3 +1,4 @@
+import { fetchJson } from "@/lib/fetch-json";
 import { extractTextFromHtml, extractTextFromTxt } from "@/lib/parser";
 import { hasDirectDocumentUrl } from "@/lib/file-types";
 import type { DocType } from "@/types";
@@ -60,7 +61,9 @@ export async function fetchDocumentContent(
   type: DocType,
   fallbackText?: string
 ): Promise<FetchedDocumentContent> {
-  const res = await fetch("/api/fetch-url", {
+  const { response: res, data } = await fetchJson<
+    FetchedDocumentContent & { error?: string }
+  >("/api/fetch-url", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -70,7 +73,6 @@ export async function fetchDocumentContent(
     }),
   });
 
-  const data = (await res.json()) as FetchedDocumentContent & { error?: string };
   if (!res.ok) throw new Error(data.error ?? "Fetch failed");
 
   const text = normalizeImportedContent(data.text ?? "");

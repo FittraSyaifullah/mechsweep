@@ -3,14 +3,17 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { v4 as uuidv4 } from "uuid";
 import { useToast } from "@/components/Toast";
+import { buildLocalAnalyzeResult } from "@/lib/document-analysis";
 import {
   combineFallbackSources,
   fetchDocumentContent,
+  MIN_RECOVERY_CONTENT_CHARS,
   normalizeImportedContent,
   recoverContentFromSources,
   shouldSkipDirectFetch,
   type FetchedDocumentContent,
 } from "@/lib/document-content";
+import { fetchJson } from "@/lib/fetch-json";
 import { LIBRARY_SAVE_DEBOUNCE_MS, MAX_LIBRARY_DOCUMENTS } from "@/lib/constants";
 import { findDuplicateDocument, hashContent } from "@/lib/duplicates";
 import {
@@ -39,6 +42,7 @@ export function useDocumentLibrary(options: UseDocumentLibraryOptions = {}) {
   const [drawerSearchQuery, setDrawerSearchQuery] = useState("");
   const [pendingDeleteIds, setPendingDeleteIds] = useState<string[] | null>(null);
   const saveTimerRef = useRef<number | null>(null);
+  const hydrateResumeDoneRef = useRef(false);
 
   useEffect(() => {
     let active = true;
@@ -56,6 +60,27 @@ export function useDocumentLibrary(options: UseDocumentLibraryOptions = {}) {
       active = false;
     };
   }, [options.filterEmptySweepErrors]);
+
+  const applyReadyMetadata = useCallback(
+    (id: string, data: AnalyzeResult, existingCategory?: string) => {
+      setDocuments((prev) =>
+        prev.map((d) =>
+          d.id === id
+            ? {
+                ...d,
+                status: "ready" as const,
+                error: undefined,
+                summary: data.summary,
+                tags: data.tags,
+                category: data.category ?? existingCategory ?? d.category,
+                keyTopics: data.keyTopics,
+              }
+            : d
+        )
+      );
+    },
+    []
+  );
 
   useEffect(() => {
     if (!hydrated) return;
@@ -102,15 +127,27 @@ export function useDocumentLibrary(options: UseDocumentLibraryOptions = {}) {
   }, []);
 
   const analyzeDoc = useCallback(
-    async (id: string, content: string, title: string, type: string) => {
+    async (id: string, content: string, title: string, type: string, categoryHint?: string) => {
       setDocuments((prev) =>
         prev.map((d) =>
           d.id === id ? { ...d, status: "processing" as const, error: undefined } : d
         )
       );
 
+      const applyResult = (data: AnalyzeResult, usedFallback = false) => {
+        applyReadyMetadata(id, data, categoryHint);
+        if (options.toastOnAnalyzeSuccess !== false) {
+          toast(
+            usedFallback ? `"${title}" ready (basic metadata)` : `"${title}" ready`,
+            usedFallback ? "info" : "success"
+          );
+        }
+      };
+
       try {
-        const res = await fetch("/api/analyze", {
+        const { response: res, data } = await fetchJson<
+          AnalyzeResult & { error?: string; fallback?: boolean }
+        >("/api/analyze", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -119,28 +156,18 @@ export function useDocumentLibrary(options: UseDocumentLibraryOptions = {}) {
             type,
           }),
         });
-        const data = (await res.json()) as AnalyzeResult & { error?: string };
+
         if (!res.ok) throw new Error(data.error ?? "Analysis failed");
-
-        setDocuments((prev) =>
-          prev.map((d) =>
-            d.id === id
-              ? {
-                  ...d,
-                  status: "ready" as const,
-                  summary: data.summary,
-                  tags: data.tags,
-                  category: data.category,
-                  keyTopics: data.keyTopics,
-                }
-              : d
-          )
-        );
-
-        if (options.toastOnAnalyzeSuccess !== false) {
-          toast(`"${title}" ready`, "success");
-        }
+        applyResult(data, Boolean(data.fallback));
       } catch (err) {
+        if (content.trim().length >= MIN_RECOVERY_CONTENT_CHARS) {
+          applyResult(
+            buildLocalAnalyzeResult(title, type, content, categoryHint),
+            true
+          );
+          return;
+        }
+
         const message = err instanceof Error ? err.message : "Analysis failed";
         setDocuments((prev) =>
           prev.map((d) =>
@@ -150,7 +177,7 @@ export function useDocumentLibrary(options: UseDocumentLibraryOptions = {}) {
         toast(`Failed: ${title}`, "error");
       }
     },
-    [options.toastOnAnalyzeSuccess, toast]
+    [applyReadyMetadata, options.toastOnAnalyzeSuccess, toast]
   );
 
   const fetchAndAnalyze = useCallback(
@@ -226,7 +253,7 @@ export function useDocumentLibrary(options: UseDocumentLibraryOptions = {}) {
 
         if (skippedDuplicate) return;
 
-        await analyzeDoc(id, content, result.title, docType);
+        await analyzeDoc(id, content, result.title, docType, result.category);
         void embedDoc(id, content, result.title);
       } catch (err) {
         const recovered = recoverContentFromSources(
@@ -248,9 +275,28 @@ export function useDocumentLibrary(options: UseDocumentLibraryOptions = {}) {
                 : d
             )
           );
-          await analyzeDoc(id, recovered, result.title, result.type);
+          await analyzeDoc(id, recovered, result.title, result.type, result.category);
           void embedDoc(id, recovered, result.title);
           toast(`Used cached preview for "${result.title}"`, "info");
+          return;
+        }
+
+        if (result.title.trim()) {
+          setDocuments((prev) =>
+            prev.map((d) =>
+              d.id === id
+                ? {
+                    ...d,
+                    content: result.title,
+                    prefetchedText: result.prefetchedText,
+                    category: d.category ?? result.category,
+                  }
+                : d
+            )
+          );
+          await analyzeDoc(id, result.title, result.title, result.type, result.category);
+          void embedDoc(id, result.title, result.title);
+          toast(`Saved "${result.title}" with title-only preview`, "info");
           return;
         }
 
@@ -265,6 +311,32 @@ export function useDocumentLibrary(options: UseDocumentLibraryOptions = {}) {
     },
     [analyzeDoc, embedDoc, toast]
   );
+
+  useEffect(() => {
+    if (!hydrated || hydrateResumeDoneRef.current) return;
+    hydrateResumeDoneRef.current = true;
+
+    for (const doc of documents) {
+      if (doc.status !== "processing") continue;
+
+      if (doc.content?.trim()) {
+        void analyzeDoc(doc.id, doc.content, doc.title, doc.type, doc.category);
+        void embedDoc(doc.id, doc.content, doc.title);
+        continue;
+      }
+
+      if (doc.source === "sweep" && doc.url) {
+        void fetchAndAnalyze(doc.id, {
+          url: doc.url,
+          type: doc.type,
+          title: doc.title,
+          category: doc.category,
+          prefetchedText: doc.prefetchedText,
+          description: doc.summary ?? doc.title,
+        });
+      }
+    }
+  }, [hydrated, documents, analyzeDoc, embedDoc, fetchAndAnalyze]);
 
   const addFromSweep = useCallback(
     async (result: SweepResult) => {
@@ -333,6 +405,11 @@ export function useDocumentLibrary(options: UseDocumentLibraryOptions = {}) {
       const skipped: string[] = [];
 
       for (const file of filesToProcess) {
+        if (!file.content.trim()) {
+          skipped.push(file.title);
+          continue;
+        }
+
         const contentHash = await hashContent(file.content);
         const duplicate = findDuplicateDocument([...documents, ...newDocs], {
           contentHash,
@@ -364,7 +441,10 @@ export function useDocumentLibrary(options: UseDocumentLibraryOptions = {}) {
       }
 
       if (newDocs.length === 0) {
-        toast("Skipped duplicate upload(s)", "info");
+        toast(
+          skipped.length > 0 ? "Skipped empty or duplicate upload(s)" : "No files added",
+          "info"
+        );
         return;
       }
 
@@ -377,7 +457,7 @@ export function useDocumentLibrary(options: UseDocumentLibraryOptions = {}) {
       );
 
       for (const doc of newDocs) {
-        void analyzeDoc(doc.id, doc.content, doc.title, doc.type);
+        await analyzeDoc(doc.id, doc.content, doc.title, doc.type, doc.category);
         void embedDoc(doc.id, doc.content, doc.title);
       }
     },
