@@ -1,9 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import { callChatAI } from "@/lib/ai";
-import { exaSearchEnabled, searchExa, describeExaSearchProfile } from "@/lib/exa";
+import { searchExa, describeExaSearchProfile } from "@/lib/exa";
 import { resolveEffectiveExaBatchSize } from "@/lib/exa-config";
 import { fetchRemoteUrl } from "@/lib/fetch-document";
 import { readJsonBody } from "@/lib/json-safe";
+import {
+  requireExaApiKey,
+  resolveWebSearchProvider,
+  sweepMistralFallbackEnabled,
+} from "@/lib/search-provider";
 import { SWEEP_MAX_EXCLUDE_URLS } from "@/lib/constants";
 import { sanitizeSweepResults } from "@/lib/sweep-sanitize";
 import { resolveSweepRequestLimit } from "@/lib/sweep-limits";
@@ -195,8 +200,10 @@ export async function POST(request: NextRequest) {
         ? resolveSweepRequestLimit(data.maxResults)
         : resolveEffectiveExaBatchSize();
     const exaProfile = describeExaSearchProfile();
+    const webProvider = resolveWebSearchProvider();
 
-    if (exaSearchEnabled()) {
+    if (webProvider === "exa") {
+      requireExaApiKey();
       try {
         const exaCandidates = await searchExa(query, excluded, maxResults);
         const results = compactSweepResults(
@@ -210,15 +217,32 @@ export async function POST(request: NextRequest) {
         });
       } catch (error) {
         const reason = error instanceof Error ? error.message : "Exa search failed";
-        console.warn(`Exa search failed, falling back to Mistral: ${reason}`);
+        if (!sweepMistralFallbackEnabled()) {
+          return NextResponse.json(
+            { error: reason, provider: "exa", exa: exaProfile },
+            { status: 502 }
+          );
+        }
+        console.warn(`Exa search failed, SWEEP_MISTRAL_FALLBACK enabled: ${reason}`);
       }
     }
 
-    const mistralCandidates = await searchWithMistral(query, excluded, maxResults);
-    const results = compactSweepResults(
-      await finalizeSweepResults(mistralCandidates, {}, maxResults)
+    if (webProvider !== "exa" || sweepMistralFallbackEnabled()) {
+      const mistralCandidates = await searchWithMistral(query, excluded, maxResults);
+      const results = compactSweepResults(
+        await finalizeSweepResults(mistralCandidates, {}, maxResults)
+      );
+      return NextResponse.json({ results, provider: "mistral", maxResults });
+    }
+
+    return NextResponse.json(
+      {
+        error:
+          "Web search requires EXA_API_KEY with SEARCH_PROVIDER=exa. Mistral is used for document analysis only.",
+        provider: webProvider,
+      },
+      { status: 503 }
     );
-    return NextResponse.json({ results, provider: "mistral", maxResults });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Sweep failed";
     const status =

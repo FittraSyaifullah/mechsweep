@@ -6,6 +6,7 @@ import {
   resolveExaRequestTimeoutMs,
 } from "@/lib/exa-config";
 import { parseJsonText } from "@/lib/json-safe";
+import { requireExaApiKey } from "@/lib/search-provider";
 import { resolveSweepMaxResults } from "@/lib/sweep-limits";
 import { sanitizeSweepResult } from "@/lib/sweep-sanitize";
 import type { SweepResult } from "@/types";
@@ -46,11 +47,7 @@ export async function searchExa(
   excludeUrls: string[] = [],
   maxResults = resolveSweepMaxResults()
 ): Promise<SweepResult[]> {
-  const apiKey = process.env.EXA_API_KEY?.trim();
-  if (!apiKey) {
-    throw new Error("EXA_API_KEY is not configured");
-  }
-
+  const apiKey = requireExaApiKey();
   const baseUrl = (process.env.EXA_BASE_URL ?? "https://api.exa.ai").trim();
   const numResults = resolveSweepMaxResults(maxResults);
   const profile = describeExaSearchProfile();
@@ -103,9 +100,11 @@ export async function searchExa(
     .map(sanitizeSweepResult);
 }
 
-export function exaSearchEnabled(): boolean {
-  const provider = process.env.SEARCH_PROVIDER?.trim().toLowerCase() ?? "exa";
-  return provider === "exa" && Boolean(process.env.EXA_API_KEY?.trim());
+/** Lightweight live check that the Exa API key works. */
+export async function verifyExaConnection(): Promise<{ ok: true; resultCount: number }> {
+  const results = await searchExa("mechanical engineering PDF", [], 1);
+  return { ok: true, resultCount: results.length };
 }
 
 export { buildExaSearchRequestBody, describeExaSearchProfile };
+export { exaSearchEnabled } from "@/lib/search-provider";

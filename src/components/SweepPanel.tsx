@@ -102,9 +102,9 @@ export default function SweepPanel({ onAdd, addedUrls }: SweepPanelProps) {
   return (
     <div className="space-y-4">
       <p className="text-sm text-slate-600">
-        Exa-powered sweep collects up to {sessionMax} unique documents per run ({plannedBatches}{" "}
-        batches of {SWEEP_BATCH_SIZE}, Exa max 100/request). Uses Exa auto search with highlights
-        and summaries. Use Sweep more to append another batch.
+        Exa-powered sweep (primary web search) collects up to {sessionMax} unique documents
+        per run ({plannedBatches} batches of {SWEEP_BATCH_SIZE}). Mistral is used for
+        document analysis only. Use Sweep more to append another batch.
       </p>
 
       <div className="flex flex-col gap-2 sm:flex-row">
