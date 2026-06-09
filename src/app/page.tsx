@@ -10,6 +10,7 @@ import UploadZone from "@/components/UploadZone";
 import ConfirmDialog from "@/components/ui/ConfirmDialog";
 import { Spinner } from "@/components/ui/Icons";
 import { useDocumentLibrary } from "@/hooks/useDocumentLibrary";
+import { MAX_LIBRARY_DOCUMENTS } from "@/lib/constants";
 import { useToast } from "@/components/Toast";
 
 type Tab = "sweep" | "upload";
@@ -38,6 +39,7 @@ export default function Home() {
         readyCount={library.readyCount}
         processingCount={library.processingCount}
         totalCount={library.documents.length}
+        maxDocuments={MAX_LIBRARY_DOCUMENTS}
         onExport={() => library.openExport(library.documents)}
         onClearAll={() => library.setShowClearConfirm(true)}
       />

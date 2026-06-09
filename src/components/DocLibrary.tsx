@@ -3,6 +3,7 @@
 import { useDeferredValue, useEffect, useMemo, useState } from "react";
 import DocCard from "@/components/DocCard";
 import { Spinner } from "@/components/ui/Icons";
+import { MAX_LIBRARY_DOCUMENTS } from "@/lib/constants";
 import { DOC_TYPES, docTypeLabel } from "@/lib/file-types";
 import type { DocSource, DocStatus, DocType, MechDocument } from "@/types";
 
@@ -242,7 +243,11 @@ export default function DocLibrary({
       <div className="mb-3 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <h2 className="text-sm font-semibold text-slate-900">
-            Library ({documents.length})
+            Library ({documents.length.toLocaleString()}
+            {documents.length >= MAX_LIBRARY_DOCUMENTS * 0.9
+              ? ` / ${MAX_LIBRARY_DOCUMENTS.toLocaleString()}`
+              : ""}
+            )
           </h2>
           <p className="mt-0.5 text-xs text-slate-500">
             Showing {firstVisible}-{lastVisible} of {filtered.length} matched documents.
@@ -312,6 +317,14 @@ export default function DocLibrary({
             </button>
           </div>
         </div>
+      )}
+
+      {documents.length >= MAX_LIBRARY_DOCUMENTS * 0.9 && (
+        <p className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+          {documents.length >= MAX_LIBRARY_DOCUMENTS
+            ? `Library full (${MAX_LIBRARY_DOCUMENTS.toLocaleString()} documents). Remove documents to add more.`
+            : `Approaching library limit — ${(MAX_LIBRARY_DOCUMENTS - documents.length).toLocaleString()} slots remaining.`}
+        </p>
       )}
 
       <div className="mb-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-[1fr_auto_auto_auto_auto]">

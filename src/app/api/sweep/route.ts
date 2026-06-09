@@ -154,7 +154,7 @@ export async function POST(request: NextRequest) {
   try {
     const body = (await request.json()) as { query?: string; excludeUrls?: string[] };
     const query = body.query?.trim() || "Find mechanical engineering documents";
-    const excluded = (body.excludeUrls ?? []).slice(0, 120);
+    const excluded = (body.excludeUrls ?? []).slice(0, 500);
 
     if (exaSearchEnabled()) {
       try {

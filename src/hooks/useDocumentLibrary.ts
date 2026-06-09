@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { v4 as uuidv4 } from "uuid";
 import { useToast } from "@/components/Toast";
 import {
@@ -11,8 +11,14 @@ import {
   shouldSkipDirectFetch,
   type FetchedDocumentContent,
 } from "@/lib/document-content";
+import { LIBRARY_SAVE_DEBOUNCE_MS, MAX_LIBRARY_DOCUMENTS } from "@/lib/constants";
 import { findDuplicateDocument, hashContent } from "@/lib/duplicates";
-import { loadDocuments, saveDocuments } from "@/lib/storage";
+import {
+  isLibraryAtCapacity,
+  loadDocuments,
+  remainingLibraryCapacity,
+  saveDocuments,
+} from "@/lib/storage";
 import type { AnalyzeResult, MechDocument, SweepResult } from "@/types";
 import type { UploadedFile } from "@/components/UploadZone";
 
@@ -32,6 +38,7 @@ export function useDocumentLibrary(options: UseDocumentLibraryOptions = {}) {
   const [selectedDoc, setSelectedDoc] = useState<MechDocument | null>(null);
   const [drawerSearchQuery, setDrawerSearchQuery] = useState("");
   const [pendingDeleteIds, setPendingDeleteIds] = useState<string[] | null>(null);
+  const saveTimerRef = useRef<number | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -51,7 +58,16 @@ export function useDocumentLibrary(options: UseDocumentLibraryOptions = {}) {
   }, [options.filterEmptySweepErrors]);
 
   useEffect(() => {
-    if (hydrated) void saveDocuments(documents);
+    if (!hydrated) return;
+
+    if (saveTimerRef.current) window.clearTimeout(saveTimerRef.current);
+    saveTimerRef.current = window.setTimeout(() => {
+      void saveDocuments(documents);
+    }, LIBRARY_SAVE_DEBOUNCE_MS);
+
+    return () => {
+      if (saveTimerRef.current) window.clearTimeout(saveTimerRef.current);
+    };
   }, [documents, hydrated]);
 
   useEffect(() => {
@@ -254,8 +270,14 @@ export function useDocumentLibrary(options: UseDocumentLibraryOptions = {}) {
     async (result: SweepResult) => {
       const id = uuidv4();
       let skippedDuplicate = false;
+      let skippedFull = false;
 
       setDocuments((prev) => {
+        if (isLibraryAtCapacity(prev.length)) {
+          skippedFull = true;
+          return prev;
+        }
+
         const duplicate = findDuplicateDocument(prev, { url: result.url });
         if (duplicate) {
           skippedDuplicate = true;
@@ -279,6 +301,11 @@ export function useDocumentLibrary(options: UseDocumentLibraryOptions = {}) {
         ];
       });
 
+      if (skippedFull) {
+        toast(`Library full (${MAX_LIBRARY_DOCUMENTS} documents). Remove some to add more.`, "error");
+        return;
+      }
+
       if (skippedDuplicate) {
         toast(`Already in library: ${result.title}`, "info");
         return;
@@ -291,10 +318,21 @@ export function useDocumentLibrary(options: UseDocumentLibraryOptions = {}) {
 
   const addFromUpload = useCallback(
     async (files: UploadedFile[]) => {
+      const remaining = remainingLibraryCapacity(documents.length);
+      if (remaining === 0) {
+        toast(`Library full (${MAX_LIBRARY_DOCUMENTS} documents). Remove some to add more.`, "error");
+        return;
+      }
+
+      const filesToProcess = files.slice(0, remaining);
+      if (filesToProcess.length < files.length) {
+        toast(`Only ${remaining} slot${remaining !== 1 ? "s" : ""} left — processing first ${remaining} file(s)`, "info");
+      }
+
       const newDocs: MechDocument[] = [];
       const skipped: string[] = [];
 
-      for (const file of files) {
+      for (const file of filesToProcess) {
         const contentHash = await hashContent(file.content);
         const duplicate = findDuplicateDocument([...documents, ...newDocs], {
           contentHash,
@@ -428,6 +466,8 @@ export function useDocumentLibrary(options: UseDocumentLibraryOptions = {}) {
     addedUrls,
     readyCount,
     processingCount,
+    libraryCapacity: MAX_LIBRARY_DOCUMENTS,
+    remainingCapacity: remainingLibraryCapacity(documents.length),
     addFromSweep,
     addFromUpload,
     retryDoc,

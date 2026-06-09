@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { MAX_LIBRARY_DOCUMENTS } from "@/lib/constants";
 import { loadDocuments, saveDocuments } from "@/lib/storage";
 import type { MechDocument } from "@/types";
 
@@ -53,5 +54,14 @@ describe("storage", () => {
     ]);
 
     expect((await loadDocuments()).map((item) => item.id)).toEqual(["1"]);
+  });
+
+  it("trims saves to the library capacity limit", async () => {
+    const docs = Array.from({ length: MAX_LIBRARY_DOCUMENTS + 5 }, (_, index) =>
+      doc({ id: `doc-${index}`, contentHash: `hash-${index}` })
+    );
+
+    await saveDocuments(docs);
+    expect((await loadDocuments()).length).toBe(MAX_LIBRARY_DOCUMENTS);
   });
 });

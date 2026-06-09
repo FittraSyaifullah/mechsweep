@@ -8,6 +8,7 @@ import DocLibrary from "@/components/DocLibrary";
 import ExportModal from "@/components/ExportModal";
 import { Spinner } from "@/components/ui/Icons";
 import { useDocumentLibrary } from "@/hooks/useDocumentLibrary";
+import { MAX_LIBRARY_DOCUMENTS } from "@/lib/constants";
 import { useToast } from "@/components/Toast";
 
 export default function LibrariesPage() {
@@ -29,6 +30,7 @@ export default function LibrariesPage() {
         readyCount={library.readyCount}
         processingCount={library.processingCount}
         totalCount={library.documents.length}
+        maxDocuments={MAX_LIBRARY_DOCUMENTS}
         onExport={() => library.openExport(library.documents)}
         onClearAll={() => library.setShowClearConfirm(true)}
       />

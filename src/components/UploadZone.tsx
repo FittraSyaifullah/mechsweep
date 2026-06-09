@@ -17,6 +17,7 @@ import {
   SUPPORTED_TYPE_LABELS,
   UPLOAD_ACCEPT,
 } from "@/lib/file-types";
+import { MAX_LIBRARY_DOCUMENTS } from "@/lib/constants";
 import type { DocType, DocumentPage, ExtractedTable, MechDocument } from "@/types";
 import { Spinner } from "@/components/ui/Icons";
 
@@ -164,7 +165,7 @@ export default function UploadZone({ onUpload }: UploadZoneProps) {
   return (
     <div className="space-y-3">
       <p className="text-sm text-slate-600">
-        Upload {SUPPORTED_TYPE_LABELS} files. Text is extracted and analyzed automatically.
+        Upload {SUPPORTED_TYPE_LABELS} files. Up to {MAX_LIBRARY_DOCUMENTS.toLocaleString()} documents stored locally in this browser.
       </p>
 
       <div

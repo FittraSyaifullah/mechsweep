@@ -7,6 +7,7 @@ interface AppHeaderProps {
   readyCount: number;
   processingCount: number;
   totalCount: number;
+  maxDocuments?: number;
   onExport: () => void;
   onClearAll: () => void;
   maxWidth?: "3xl" | "6xl";
@@ -16,11 +17,16 @@ export default function AppHeader({
   readyCount,
   processingCount,
   totalCount,
+  maxDocuments,
   onExport,
   onClearAll,
   maxWidth = "3xl",
 }: AppHeaderProps) {
   const widthClass = maxWidth === "6xl" ? "max-w-6xl" : "max-w-3xl";
+  const capacityLabel =
+    maxDocuments && totalCount > 0
+      ? `${totalCount.toLocaleString()} / ${maxDocuments.toLocaleString()} documents`
+      : null;
 
   return (
     <header className="border-b border-slate-200 bg-white">
@@ -33,8 +39,10 @@ export default function AppHeader({
             {processingCount > 0
               ? `${processingCount} processing · ${readyCount} ready`
               : totalCount > 0
-                ? `${readyCount} of ${totalCount} ready to export`
-                : "Find or upload ME documents for RAG"}
+                ? capacityLabel
+                  ? `${capacityLabel} · ${readyCount} ready to export`
+                  : `${readyCount} of ${totalCount} ready to export`
+                : `Up to ${maxDocuments?.toLocaleString() ?? "5,000"} documents stored locally`}
           </p>
         </div>
 
