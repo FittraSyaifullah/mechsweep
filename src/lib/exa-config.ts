@@ -11,6 +11,7 @@ import {
   resolveExaTextMaxCharacters,
   resolveSweepBatchSize,
 } from "@/lib/sweep-limits";
+import { sanitizeEnvString } from "@/lib/env-sanitize";
 
 export const EXA_SEARCH_TYPES = [
   "auto",
@@ -61,7 +62,9 @@ function hostnameFromUrl(url: string): string | null {
 }
 
 export function resolveExaSearchType(): ExaSearchType {
-  const raw = (process.env.EXA_SEARCH_TYPE?.trim() || DEFAULT_EXA_SEARCH_TYPE).toLowerCase();
+  const raw = (
+    sanitizeEnvString(process.env.EXA_SEARCH_TYPE) || DEFAULT_EXA_SEARCH_TYPE
+  ).toLowerCase();
   return EXA_SEARCH_TYPES.includes(raw as ExaSearchType)
     ? (raw as ExaSearchType)
     : DEFAULT_EXA_SEARCH_TYPE;

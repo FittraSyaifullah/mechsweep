@@ -5,6 +5,7 @@ import {
   describeExaSearchProfile,
   resolveExaRequestTimeoutMs,
 } from "@/lib/exa-config";
+import { resolveExaBaseUrl } from "@/lib/env-sanitize";
 import { parseJsonText } from "@/lib/json-safe";
 import { requireExaApiKey } from "@/lib/search-provider";
 import { resolveSweepMaxResults } from "@/lib/sweep-limits";
@@ -49,7 +50,7 @@ export async function searchExa(
   excludeDomains?: string[]
 ): Promise<SweepResult[]> {
   const apiKey = requireExaApiKey();
-  const baseUrl = (process.env.EXA_BASE_URL ?? "https://api.exa.ai").trim();
+  const baseUrl = resolveExaBaseUrl();
   const numResults = resolveSweepMaxResults(maxResults);
   const profile = describeExaSearchProfile();
   const requestBody = buildExaSearchRequestBody({

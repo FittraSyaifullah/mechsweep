@@ -9,17 +9,17 @@ import {
   SWEEP_MAX_BATCHES,
   SWEEP_SERVER_TIMEOUT_MS,
 } from "@/lib/constants";
+import { sanitizeEnvNumber, sanitizeEnvString } from "@/lib/env-sanitize";
 
 export function resolveSweepMaxResults(override?: number): number {
   if (override !== undefined && Number.isFinite(override)) {
     return Math.min(Math.max(Math.floor(override), MIN_SWEEP_RESULTS), MAX_SWEEP_RESULTS);
   }
 
-  const raw = Number(
-    process.env.SWEEP_MAX_RESULTS ?? process.env.EXA_NUM_RESULTS ?? DEFAULT_SWEEP_MAX_RESULTS
+  const raw = sanitizeEnvNumber(
+    process.env.SWEEP_MAX_RESULTS ?? process.env.EXA_NUM_RESULTS,
+    DEFAULT_SWEEP_MAX_RESULTS
   );
-
-  if (!Number.isFinite(raw)) return DEFAULT_SWEEP_MAX_RESULTS;
   return Math.min(Math.max(Math.floor(raw), MIN_SWEEP_RESULTS), MAX_SWEEP_RESULTS);
 }
 
@@ -29,8 +29,7 @@ export function resolveSweepBatchSize(override?: number): number {
     return Math.min(Math.max(Math.floor(override), MIN_SWEEP_RESULTS), MAX_SWEEP_RESULTS);
   }
 
-  const raw = Number(process.env.SWEEP_BATCH_SIZE ?? SWEEP_BATCH_SIZE);
-  if (!Number.isFinite(raw)) return SWEEP_BATCH_SIZE;
+  const raw = sanitizeEnvNumber(process.env.SWEEP_BATCH_SIZE, SWEEP_BATCH_SIZE);
   return Math.min(Math.max(Math.floor(raw), MIN_SWEEP_RESULTS), MAX_SWEEP_RESULTS);
 }
 
@@ -40,16 +39,15 @@ export function resolveSweepSessionMax(override?: number): number {
     return Math.min(Math.max(Math.floor(override), MIN_SWEEP_RESULTS), resolveSweepSessionCap());
   }
 
-  const raw = Number(
-    process.env.SWEEP_SESSION_MAX ?? process.env.SWEEP_MAX_RESULTS ?? DEFAULT_SWEEP_SESSION_MAX
+  const raw = sanitizeEnvNumber(
+    process.env.SWEEP_SESSION_MAX ?? process.env.SWEEP_MAX_RESULTS,
+    DEFAULT_SWEEP_SESSION_MAX
   );
-  if (!Number.isFinite(raw)) return DEFAULT_SWEEP_SESSION_MAX;
   return Math.min(Math.max(Math.floor(raw), MIN_SWEEP_RESULTS), resolveSweepSessionCap());
 }
 
 export function resolveSweepMaxBatches(): number {
-  const raw = Number(process.env.SWEEP_MAX_BATCHES ?? SWEEP_MAX_BATCHES);
-  if (!Number.isFinite(raw)) return SWEEP_MAX_BATCHES;
+  const raw = sanitizeEnvNumber(process.env.SWEEP_MAX_BATCHES, SWEEP_MAX_BATCHES);
   return Math.min(Math.max(Math.floor(raw), 1), 50);
 }
 
@@ -97,8 +95,10 @@ export function resolveExaRequestTimeoutMs(
   numResults: number,
   searchType = "fast"
 ): number {
-  const platformCap = Number(process.env.SWEEP_SERVER_TIMEOUT_MS ?? SWEEP_SERVER_TIMEOUT_MS);
-  const safeCap = Number.isFinite(platformCap) ? platformCap : SWEEP_SERVER_TIMEOUT_MS;
+  const platformCap = sanitizeEnvNumber(
+    process.env.SWEEP_SERVER_TIMEOUT_MS,
+    SWEEP_SERVER_TIMEOUT_MS
+  );
 
   const base =
     searchType === "deep-reasoning"
@@ -111,7 +111,7 @@ export function resolveExaRequestTimeoutMs(
             ? 12_000
             : 10_000;
 
-  return Math.min(safeCap, base, 8_000 + Math.max(numResults, 1) * 450);
+  return Math.min(platformCap, base, 8_000 + Math.max(numResults, 1) * 450);
 }
 
 export function resolveSweepServerTimeoutMs(): number {
