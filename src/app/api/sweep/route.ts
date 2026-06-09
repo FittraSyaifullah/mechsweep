@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { callOpenRouter } from "@/lib/openrouter";
+import { callChatAI } from "@/lib/ai";
 import {
   detectDocTypeFromContentType,
   detectDocTypeFromUrl,
@@ -10,7 +10,8 @@ import type { DocType, SweepResult } from "@/types";
 const VALIDATE_TIMEOUT_MS = 12000;
 const MAX_RESULTS = 24;
 const MAX_FETCH_BYTES = 15 * 1024 * 1024;
-const DEFAULT_SEARCH_MODEL = "perplexity/sonar-pro";
+const DEFAULT_MISTRAL_SEARCH_MODEL = "mistral-large-latest";
+const DEFAULT_OPENROUTER_SEARCH_MODEL = "perplexity/sonar-pro";
 
 const SWEEP_SYSTEM_PROMPT = `You are a mechanical engineering research agent. Find 20-30 real, publicly accessible mechanical engineering documents (PDFs, technical reports, datasheets, textbooks, standards summaries, or CSV datasets) relevant to the user's query.
 
@@ -101,8 +102,10 @@ export async function POST(request: NextRequest) {
         ? `${query}\n\nAvoid these URLs because they are already in the user's current sweep/library:\n${excluded.join("\n")}`
         : query;
 
-    const rawText = await callOpenRouter({
-      model: process.env.OPENROUTER_SEARCH_MODEL ?? DEFAULT_SEARCH_MODEL,
+    const rawText = await callChatAI({
+      mistralModel: process.env.MISTRAL_SEARCH_MODEL ?? DEFAULT_MISTRAL_SEARCH_MODEL,
+      openRouterModel:
+        process.env.OPENROUTER_SEARCH_MODEL ?? DEFAULT_OPENROUTER_SEARCH_MODEL,
       messages: [
         { role: "system", content: SWEEP_SYSTEM_PROMPT },
         { role: "user", content: userPrompt },

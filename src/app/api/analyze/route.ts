@@ -1,11 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
-import { callOpenRouter } from "@/lib/openrouter";
+import { callChatAI } from "@/lib/ai";
 import { parseJsonFromResponse, truncateContent } from "@/lib/parser";
 import type { AnalyzeResult } from "@/types";
 import { ME_CATEGORIES } from "@/types";
 
 const ANALYZE_CONTENT_CHARS = 3500;
-const DEFAULT_ANALYZE_MODEL = "google/gemini-2.5-flash-lite";
+const DEFAULT_MISTRAL_ANALYZE_MODEL = "mistral-small-latest";
+const DEFAULT_OPENROUTER_ANALYZE_MODEL = "google/gemini-2.5-flash-lite";
 
 const ANALYZE_SYSTEM_PROMPT = `Mechanical engineering document classifier. Return ONLY compact JSON:
 
@@ -35,8 +36,10 @@ export async function POST(request: NextRequest) {
 
     const truncated = truncateContent(body.content, ANALYZE_CONTENT_CHARS);
 
-    const rawText = await callOpenRouter({
-      model: process.env.OPENROUTER_ANALYZE_MODEL ?? DEFAULT_ANALYZE_MODEL,
+    const rawText = await callChatAI({
+      mistralModel: process.env.MISTRAL_ANALYZE_MODEL ?? DEFAULT_MISTRAL_ANALYZE_MODEL,
+      openRouterModel:
+        process.env.OPENROUTER_ANALYZE_MODEL ?? DEFAULT_OPENROUTER_ANALYZE_MODEL,
       messages: [
         { role: "system", content: ANALYZE_SYSTEM_PROMPT },
         {
