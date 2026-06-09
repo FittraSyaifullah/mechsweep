@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { callChatAI } from "@/lib/ai";
+import { exaSearchEnabled, searchExa } from "@/lib/exa";
 import { fetchRemoteUrl } from "@/lib/fetch-document";
 import {
   detectDocTypeFromContentType,
@@ -84,64 +85,80 @@ async function validateSweepResult(result: SweepResult): Promise<SweepResult | n
   }
 }
 
+async function finalizeSweepResults(candidates: SweepResult[]): Promise<SweepResult[]> {
+  const settled = await Promise.all(candidates.map(validateSweepResult));
+  return settled
+    .filter((r): r is SweepResult => r !== null)
+    .sort((a, b) => b.relevanceScore - a.relevanceScore)
+    .slice(0, MAX_RESULTS);
+}
+
+async function searchWithMistral(query: string, excluded: string[]): Promise<SweepResult[]> {
+  const userPrompt =
+    excluded.length > 0
+      ? `${query}\n\nAvoid these URLs because they are already in the user's current sweep/library:\n${excluded.join("\n")}`
+      : query;
+
+  const { text: rawText } = await callChatAI({
+    mistralModel: process.env.MISTRAL_SEARCH_MODEL?.trim() ?? DEFAULT_MISTRAL_SEARCH_MODEL,
+    openRouterModel:
+      process.env.OPENROUTER_SEARCH_MODEL?.trim() ?? DEFAULT_OPENROUTER_SEARCH_MODEL,
+    messages: [
+      { role: "system", content: SWEEP_SYSTEM_PROMPT },
+      { role: "user", content: userPrompt },
+    ],
+    maxTokens: 4500,
+    temperature: 0.2,
+    timeoutMs: 55000,
+    responseFormat: { type: "json_object" },
+  });
+
+  const parsedBody = parseJsonFromResponse<{ results?: SweepResult[] } | SweepResult[]>(rawText);
+  const parsed = Array.isArray(parsedBody) ? parsedBody : (parsedBody.results ?? []);
+
+  return parsed
+    .filter(
+      (r) =>
+        r.title &&
+        r.url &&
+        /^https?:\/\//i.test(r.url) &&
+        r.type &&
+        typeof r.relevanceScore === "number"
+    )
+    .map((r) => {
+      const url = normalizeUrl(r.url);
+      if (!url) return null;
+      if (excluded.includes(url)) return null;
+      return {
+        ...r,
+        url,
+        type: normalizeDocType(r.type, url),
+      };
+    })
+    .filter((r): r is SweepResult => r !== null)
+    .slice(0, MAX_AI_CANDIDATES);
+}
+
 export async function POST(request: NextRequest) {
   try {
     const body = (await request.json()) as { query?: string; excludeUrls?: string[] };
     const query = body.query?.trim() || "Find mechanical engineering documents";
     const excluded = (body.excludeUrls ?? []).slice(0, 120);
-    const userPrompt =
-      excluded.length > 0
-        ? `${query}\n\nAvoid these URLs because they are already in the user's current sweep/library:\n${excluded.join("\n")}`
-        : query;
 
-    const { text: rawText, provider } = await callChatAI({
-      mistralModel: process.env.MISTRAL_SEARCH_MODEL?.trim() ?? DEFAULT_MISTRAL_SEARCH_MODEL,
-      openRouterModel:
-        process.env.OPENROUTER_SEARCH_MODEL?.trim() ?? DEFAULT_OPENROUTER_SEARCH_MODEL,
-      messages: [
-        { role: "system", content: SWEEP_SYSTEM_PROMPT },
-        { role: "user", content: userPrompt },
-      ],
-      maxTokens: 4500,
-      temperature: 0.2,
-      timeoutMs: 55000,
-      responseFormat: { type: "json_object" },
-    });
+    if (exaSearchEnabled()) {
+      try {
+        const exaCandidates = (await searchExa(query, excluded)).slice(0, MAX_AI_CANDIDATES);
+        const results = await finalizeSweepResults(exaCandidates);
+        return NextResponse.json({ results, provider: "exa" });
+      } catch (error) {
+        const reason = error instanceof Error ? error.message : "Exa search failed";
+        console.warn(`Exa search failed, falling back to Mistral: ${reason}`);
+      }
+    }
 
-    const parsedBody = parseJsonFromResponse<{ results?: SweepResult[] } | SweepResult[]>(
-      rawText
-    );
-    const parsed = Array.isArray(parsedBody) ? parsedBody : (parsedBody.results ?? []);
-
-    const candidates = parsed
-      .filter(
-        (r) =>
-          r.title &&
-          r.url &&
-          /^https?:\/\//i.test(r.url) &&
-          r.type &&
-          typeof r.relevanceScore === "number"
-      )
-      .map((r) => {
-        const url = normalizeUrl(r.url);
-        if (!url) return null;
-        if (excluded.includes(url)) return null;
-        return {
-          ...r,
-          url,
-          type: normalizeDocType(r.type, url),
-        };
-      })
-      .filter((r): r is SweepResult => r !== null)
-      .slice(0, MAX_AI_CANDIDATES);
-
-    const settled = await Promise.all(candidates.map(validateSweepResult));
-    const results = settled
-      .filter((r): r is SweepResult => r !== null)
-      .sort((a, b) => b.relevanceScore - a.relevanceScore)
-      .slice(0, MAX_RESULTS);
-
-    return NextResponse.json({ results, provider });
+    const mistralCandidates = await searchWithMistral(query, excluded);
+    const results = await finalizeSweepResults(mistralCandidates);
+    return NextResponse.json({ results, provider: "mistral" });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Sweep failed";
     return NextResponse.json({ error: message }, { status: 500 });

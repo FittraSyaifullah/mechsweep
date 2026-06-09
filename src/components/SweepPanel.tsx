@@ -19,6 +19,13 @@ interface SweepPanelProps {
   addedUrls: Set<string>;
 }
 
+function providerLabel(provider: string | null): string {
+  if (provider === "exa") return "Exa Search";
+  if (provider === "mistral") return "Mistral AI";
+  if (provider === "openrouter") return "OpenRouter";
+  return provider ?? "";
+}
+
 export default function SweepPanel({ onAdd, addedUrls }: SweepPanelProps) {
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<SweepResult[]>([]);
@@ -52,7 +59,7 @@ export default function SweepPanel({ onAdd, addedUrls }: SweepPanelProps) {
         error?: string;
       };
       if (!res.ok) throw new Error(data.error ?? "Sweep failed");
-      setProvider(data.provider ?? "mistral");
+      setProvider(data.provider ?? "exa");
       const nextResults = data.results ?? [];
       setResults((prev) => {
         const merged = append ? [...prev] : [];
@@ -133,7 +140,7 @@ export default function SweepPanel({ onAdd, addedUrls }: SweepPanelProps) {
           <div className="flex items-center justify-between">
             <p className="text-xs font-medium text-slate-500">
               {results.length} results
-              {provider ? ` · ${provider === "mistral" ? "Mistral AI" : provider}` : ""}
+              {provider ? ` · ${providerLabel(provider)}` : ""}
             </p>
             <div className="flex items-center gap-3">
               <button
