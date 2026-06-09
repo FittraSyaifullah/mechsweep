@@ -1,4 +1,5 @@
 # MechSweep
+MechSweep.Vercel.App
 
 MechSweep is an open-source Next.js application for collecting, processing, searching, analyzing, and exporting mechanical engineering documents for RAG pipelines.
 
