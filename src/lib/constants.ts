@@ -43,3 +43,6 @@ export const SWEEP_BATCH_SIZE = 50;
 
 /** Max batched Exa calls in one full sweep. */
 export const SWEEP_MAX_BATCHES = 10;
+
+/** Parallel document analyses (fetch + AI classify) in the browser. */
+export const ANALYZE_CONCURRENCY = 4;

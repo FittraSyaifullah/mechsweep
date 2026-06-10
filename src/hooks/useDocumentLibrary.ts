@@ -14,7 +14,8 @@ import {
   type FetchedDocumentContent,
 } from "@/lib/document-content";
 import { fetchJson } from "@/lib/fetch-json";
-import { LIBRARY_SAVE_DEBOUNCE_MS, MAX_LIBRARY_DOCUMENTS } from "@/lib/constants";
+import { LIBRARY_SAVE_DEBOUNCE_MS, MAX_LIBRARY_DOCUMENTS, ANALYZE_CONCURRENCY } from "@/lib/constants";
+import { runWithConcurrency } from "@/lib/concurrency";
 import {
   buildNormalizedUrlSet,
   dedupeSweepResultsByUrl,
@@ -188,6 +189,22 @@ export function useDocumentLibrary(options: UseDocumentLibraryOptions = {}) {
     [applyReadyMetadata, options.toastOnAnalyzeSuccess, toast]
   );
 
+  const analyzeAndEmbed = useCallback(
+    async (
+      id: string,
+      content: string,
+      title: string,
+      type: string,
+      categoryHint?: string
+    ) => {
+      await Promise.all([
+        analyzeDoc(id, content, title, type, categoryHint),
+        embedDoc(id, content, title),
+      ]);
+    },
+    [analyzeDoc, embedDoc]
+  );
+
   const fetchAndAnalyze = useCallback(
     async (
       id: string,
@@ -261,8 +278,7 @@ export function useDocumentLibrary(options: UseDocumentLibraryOptions = {}) {
 
         if (skippedDuplicate) return;
 
-        await analyzeDoc(id, content, result.title, docType, result.category);
-        void embedDoc(id, content, result.title);
+        await analyzeAndEmbed(id, content, result.title, docType, result.category);
       } catch (err) {
         const recovered = recoverContentFromSources(
           result.prefetchedText,
@@ -303,8 +319,7 @@ export function useDocumentLibrary(options: UseDocumentLibraryOptions = {}) {
             return;
           }
 
-          await analyzeDoc(id, recovered, result.title, result.type, result.category);
-          void embedDoc(id, recovered, result.title);
+          await analyzeAndEmbed(id, recovered, result.title, result.type, result.category);
           toast(`Used cached preview for "${result.title}"`, "info");
           return;
         }
@@ -322,8 +337,7 @@ export function useDocumentLibrary(options: UseDocumentLibraryOptions = {}) {
                 : d
             )
           );
-          await analyzeDoc(id, result.title, result.title, result.type, result.category);
-          void embedDoc(id, result.title, result.title);
+          await analyzeAndEmbed(id, result.title, result.title, result.type, result.category);
           toast(`Saved "${result.title}" with title-only preview`, "info");
           return;
         }
@@ -337,24 +351,24 @@ export function useDocumentLibrary(options: UseDocumentLibraryOptions = {}) {
         toast(message.length > 120 ? `${message.slice(0, 117)}…` : message, "error");
       }
     },
-    [analyzeDoc, embedDoc, toast]
+    [analyzeAndEmbed, toast]
   );
 
   useEffect(() => {
     if (!hydrated || hydrateResumeDoneRef.current) return;
     hydrateResumeDoneRef.current = true;
 
-    for (const doc of documents) {
-      if (doc.status !== "processing") continue;
+    const pending = documents.filter((doc) => doc.status === "processing");
+    if (pending.length === 0) return;
 
+    void runWithConcurrency(pending, ANALYZE_CONCURRENCY, async (doc) => {
       if (doc.content?.trim()) {
-        void analyzeDoc(doc.id, doc.content, doc.title, doc.type, doc.category);
-        void embedDoc(doc.id, doc.content, doc.title);
-        continue;
+        await analyzeAndEmbed(doc.id, doc.content, doc.title, doc.type, doc.category);
+        return;
       }
 
       if (doc.source === "sweep" && doc.url) {
-        void fetchAndAnalyze(doc.id, {
+        await fetchAndAnalyze(doc.id, {
           url: doc.url,
           type: doc.type,
           title: doc.title,
@@ -363,8 +377,8 @@ export function useDocumentLibrary(options: UseDocumentLibraryOptions = {}) {
           description: doc.summary ?? doc.title,
         });
       }
-    }
-  }, [hydrated, documents, analyzeDoc, embedDoc, fetchAndAnalyze]);
+    });
+  }, [hydrated, documents, analyzeAndEmbed, fetchAndAnalyze]);
 
   const addFromSweep = useCallback(
     async (result: SweepResult) => {
@@ -499,20 +513,18 @@ export function useDocumentLibrary(options: UseDocumentLibraryOptions = {}) {
         "info"
       );
 
-      for (const doc of newDocs) {
-        await analyzeDoc(doc.id, doc.content, doc.title, doc.type, doc.category);
-        void embedDoc(doc.id, doc.content, doc.title);
-      }
+      await runWithConcurrency(newDocs, ANALYZE_CONCURRENCY, async (doc) => {
+        await analyzeAndEmbed(doc.id, doc.content, doc.title, doc.type, doc.category);
+      });
     },
-    [analyzeDoc, documents, embedDoc, toast]
+    [analyzeAndEmbed, documents, toast]
   );
 
   const retryDoc = useCallback(
     async (doc: MechDocument) => {
       if (doc.source === "sweep" && doc.url) {
         if (doc.content?.trim() && doc.status === "error") {
-          await analyzeDoc(doc.id, doc.content, doc.title, doc.type);
-          void embedDoc(doc.id, doc.content, doc.title);
+          await analyzeAndEmbed(doc.id, doc.content, doc.title, doc.type);
           return;
         }
 
@@ -528,11 +540,10 @@ export function useDocumentLibrary(options: UseDocumentLibraryOptions = {}) {
       }
 
       if (doc.content) {
-        await analyzeDoc(doc.id, doc.content, doc.title, doc.type);
-        void embedDoc(doc.id, doc.content, doc.title);
+        await analyzeAndEmbed(doc.id, doc.content, doc.title, doc.type);
       }
     },
-    [analyzeDoc, embedDoc, fetchAndAnalyze]
+    [analyzeAndEmbed, fetchAndAnalyze]
   );
 
   function requestRemoveDoc(id: string) {

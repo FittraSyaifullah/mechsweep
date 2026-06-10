@@ -1,7 +1,8 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { SWEEP_BATCH_SIZE } from "@/lib/constants";
+import { SWEEP_BATCH_SIZE, ANALYZE_CONCURRENCY } from "@/lib/constants";
+import { runWithConcurrency } from "@/lib/concurrency";
 import { runBatchedSweep } from "@/lib/sweep-client";
 import { dedupeSweepResultsByUrl, isDocumentUrlKnown } from "@/lib/duplicates";
 import { resolveSweepSessionMax, sweepBatchCount } from "@/lib/sweep-limits";
@@ -117,16 +118,12 @@ export default function SweepPanel({ onAdd, addedUrls }: SweepPanelProps) {
     if (pending.length === 0 || adding) return;
 
     setAdding(true);
-    let added = 0;
     try {
-      for (let i = 0; i < pending.length; i++) {
-        setAddProgress(`Adding ${i + 1} of ${pending.length}…`);
-        await onAdd(pending[i]);
-        added += 1;
-      }
-      if (added > 0) {
-        toast(`Added ${added} document${added !== 1 ? "s" : ""} to library`, "success");
-      }
+      await runWithConcurrency(pending, ANALYZE_CONCURRENCY, async (result, index) => {
+        setAddProgress(`Adding ${index + 1} of ${pending.length}…`);
+        await onAdd(result);
+      });
+      toast(`Added ${pending.length} document${pending.length !== 1 ? "s" : ""} to library`, "success");
     } finally {
       setAdding(false);
       setAddProgress(null);

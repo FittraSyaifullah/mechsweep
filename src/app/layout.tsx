@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Inter } from "next/font/google";
+import CreatorCredits from "@/components/CreatorCredits";
 import { ToastProvider } from "@/components/Toast";
 import "./globals.css";
 
@@ -18,7 +19,10 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body className={inter.className}>
-        <ToastProvider>{children}</ToastProvider>
+        <ToastProvider>
+          <CreatorCredits />
+          {children}
+        </ToastProvider>
       </body>
     </html>
   );
