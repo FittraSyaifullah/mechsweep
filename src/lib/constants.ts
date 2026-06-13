@@ -46,6 +46,3 @@ export const SWEEP_MAX_BATCHES = 10;
 
 /** Parallel document analyses (fetch + AI classify) in the browser. */
 export const ANALYZE_CONCURRENCY = 4;
-
-/** Parallel cloud document uploads per sync batch. */
-export const CLOUD_SYNC_CONCURRENCY = 3;

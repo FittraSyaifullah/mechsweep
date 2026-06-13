@@ -1,6 +1,4 @@
 import { MAX_LIBRARY_DOCUMENTS } from "@/lib/constants";
-import { pullCloudDocuments, pushCloudDocuments, type CloudSyncResult } from "@/lib/cloud-library";
-import { mergeDocumentLibraries } from "@/lib/library-merge";
 import { removeDuplicateDocuments } from "@/lib/duplicates";
 import type { MechDocument } from "@/types";
 
@@ -158,28 +156,6 @@ export function remainingLibraryCapacity(count: number): number {
 export async function loadDocuments(): Promise<MechDocument[]> {
   if (typeof window === "undefined") return [];
 
-  const local = await loadDocumentsLocal();
-  try {
-    const cloud = await pullCloudDocuments();
-    if (!cloud.cloudEnabled) return local;
-
-    if (cloud.documents.length === 0) {
-      if (local.length > 0) {
-        await pushCloudDocuments(local);
-      }
-      return local;
-    }
-
-    const merged = mergeDocumentLibraries(local, cloud.documents);
-    await saveDocumentsLocal(merged);
-    await pushCloudDocuments(merged);
-    return merged;
-  } catch {
-    return local;
-  }
-}
-
-async function loadDocumentsLocal(): Promise<MechDocument[]> {
   try {
     const db = await openDatabase();
     let docs = await readAllFromLibraryStore(db);
@@ -207,22 +183,13 @@ async function loadDocumentsLocal(): Promise<MechDocument[]> {
 export async function saveDocuments(docs: MechDocument[]): Promise<void> {
   if (typeof window === "undefined") return;
   const normalized = trimToCapacity(docs);
-  await saveDocumentsLocal(normalized);
-  void pushCloudDocuments(normalized);
-}
 
-export async function syncDocumentsToCloud(docs?: MechDocument[]): Promise<CloudSyncResult> {
-  const payload = docs ? trimToCapacity(docs) : await loadDocumentsLocal();
-  return pushCloudDocuments(payload);
-}
-
-async function saveDocumentsLocal(docs: MechDocument[]): Promise<void> {
   try {
     const db = await openDatabase();
-    await writeAllToLibraryStore(db, docs);
+    await writeAllToLibraryStore(db, normalized);
     db.close();
   } catch {
-    saveToLocalStorage(docs);
+    saveToLocalStorage(normalized);
   }
 }
 
@@ -265,7 +232,4 @@ export async function deleteDocuments(ids: string[]): Promise<void> {
     const idSet = new Set(ids);
     saveToLocalStorage(loadFromLocalStorage().filter((doc) => !idSet.has(doc.id)));
   }
-
-  const remaining = await loadDocumentsLocal();
-  void pushCloudDocuments(remaining);
 }
