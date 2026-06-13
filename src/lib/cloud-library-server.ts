@@ -7,7 +7,9 @@ import type { MechDocument } from "@/types";
 const DOC_PREFIX = "libraries";
 
 export function isCloudStorageConfigured(): boolean {
-  return Boolean(process.env.BLOB_READ_WRITE_TOKEN?.trim());
+  return Boolean(
+    process.env.BLOB_READ_WRITE_TOKEN?.trim() || process.env.BLOB_STORE_ID?.trim()
+  );
 }
 
 function docPath(libraryId: string, docId: string): string {
