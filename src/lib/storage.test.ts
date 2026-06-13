@@ -5,7 +5,12 @@ import type { MechDocument } from "@/types";
 
 vi.mock("@/lib/cloud-library", () => ({
   pullCloudDocuments: vi.fn(async () => ({ documents: [], cloudEnabled: false })),
-  pushCloudDocuments: vi.fn(async () => true),
+  pushCloudDocuments: vi.fn(async () => ({
+    ok: true,
+    synced: 0,
+    failed: 0,
+    cloudEnabled: false,
+  })),
 }));
 
 function doc(overrides: Partial<MechDocument>): MechDocument {

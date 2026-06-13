@@ -1,5 +1,5 @@
 import { MAX_LIBRARY_DOCUMENTS } from "@/lib/constants";
-import { pullCloudDocuments, pushCloudDocuments } from "@/lib/cloud-library";
+import { pullCloudDocuments, pushCloudDocuments, type CloudSyncResult } from "@/lib/cloud-library";
 import { mergeDocumentLibraries } from "@/lib/library-merge";
 import { removeDuplicateDocuments } from "@/lib/duplicates";
 import type { MechDocument } from "@/types";
@@ -165,14 +165,14 @@ export async function loadDocuments(): Promise<MechDocument[]> {
 
     if (cloud.documents.length === 0) {
       if (local.length > 0) {
-        void pushCloudDocuments(local);
+        await pushCloudDocuments(local);
       }
       return local;
     }
 
     const merged = mergeDocumentLibraries(local, cloud.documents);
     await saveDocumentsLocal(merged);
-    void pushCloudDocuments(merged);
+    await pushCloudDocuments(merged);
     return merged;
   } catch {
     return local;
@@ -209,6 +209,11 @@ export async function saveDocuments(docs: MechDocument[]): Promise<void> {
   const normalized = trimToCapacity(docs);
   await saveDocumentsLocal(normalized);
   void pushCloudDocuments(normalized);
+}
+
+export async function syncDocumentsToCloud(docs?: MechDocument[]): Promise<CloudSyncResult> {
+  const payload = docs ? trimToCapacity(docs) : await loadDocumentsLocal();
+  return pushCloudDocuments(payload);
 }
 
 async function saveDocumentsLocal(docs: MechDocument[]): Promise<void> {

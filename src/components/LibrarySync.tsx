@@ -3,23 +3,56 @@
 import { useEffect, useState } from "react";
 import { useToast } from "@/components/Toast";
 import Button from "@/components/ui/Button";
+import { checkCloudSyncAvailable, resetCloudSyncState } from "@/lib/cloud-library";
 import { getLibraryId, setLibraryId } from "@/lib/library-id";
-import { resetCloudSyncState } from "@/lib/cloud-library";
+import { syncDocumentsToCloud } from "@/lib/storage";
 
 export default function LibrarySync() {
   const { toast } = useToast();
   const [libraryId, setLibraryIdState] = useState("");
   const [linkValue, setLinkValue] = useState("");
   const [open, setOpen] = useState(false);
+  const [cloudReady, setCloudReady] = useState<boolean | null>(null);
+  const [syncing, setSyncing] = useState(false);
 
   useEffect(() => {
     setLibraryIdState(getLibraryId());
+    void checkCloudSyncAvailable().then(setCloudReady);
   }, []);
 
   async function copySyncCode() {
     if (!libraryId) return;
     await navigator.clipboard.writeText(libraryId);
     toast("Sync code copied", "success");
+  }
+
+  async function syncNow() {
+    setSyncing(true);
+    try {
+      const result = await syncDocumentsToCloud();
+      if (!result.cloudEnabled) {
+        toast("Cloud sync is not configured on the server", "error");
+        setCloudReady(false);
+        return;
+      }
+
+      if (result.ok) {
+        toast(
+          result.synced > 0
+            ? `Synced ${result.synced} change${result.synced !== 1 ? "s" : ""} to cloud`
+            : "Library is already up to date",
+          "success"
+        );
+        return;
+      }
+
+      toast(
+        `Sync incomplete — ${result.failed} item${result.failed !== 1 ? "s" : ""} failed`,
+        "error"
+      );
+    } finally {
+      setSyncing(false);
+    }
   }
 
   function linkLibrary() {
@@ -55,7 +88,18 @@ export default function LibrarySync() {
           <div className="absolute right-0 top-full z-50 mt-2 w-72 rounded-xl border border-slate-200 bg-white p-4 shadow-float">
             <p className="text-sm font-medium text-slate-900">Cloud library sync</p>
             <p className="mt-1 text-xs leading-relaxed text-slate-500">
-              Your documents sync across devices when you use the same sync code.
+              Use the same sync code on every device. Documents upload one at a time to stay
+              within server limits.
+            </p>
+
+            <p className="mt-2 text-xs">
+              {cloudReady === null && "Checking cloud sync…"}
+              {cloudReady === true && (
+                <span className="text-emerald-700">Cloud sync is active</span>
+              )}
+              {cloudReady === false && (
+                <span className="text-amber-700">Cloud sync unavailable on server</span>
+              )}
             </p>
 
             <label className="mt-3 block text-xs font-medium text-slate-600">Your sync code</label>
@@ -68,6 +112,17 @@ export default function LibrarySync() {
               </Button>
             </div>
 
+            <Button
+              variant="primary"
+              size="sm"
+              className="mt-3 w-full"
+              loading={syncing}
+              onClick={() => void syncNow()}
+              icon={syncing ? undefined : undefined}
+            >
+              {syncing ? "Syncing…" : "Sync now"}
+            </Button>
+
             <label className="mt-3 block text-xs font-medium text-slate-600">
               Link another device
             </label>
@@ -78,7 +133,7 @@ export default function LibrarySync() {
               placeholder="Paste sync code from another computer"
               className="input-base mt-1 text-xs"
             />
-            <Button variant="primary" size="sm" className="mt-3 w-full" onClick={linkLibrary}>
+            <Button variant="ghost" size="sm" className="mt-2 w-full" onClick={linkLibrary}>
               Link library
             </Button>
           </div>
