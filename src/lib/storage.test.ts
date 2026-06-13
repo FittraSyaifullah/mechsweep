@@ -3,6 +3,11 @@ import { MAX_LIBRARY_DOCUMENTS } from "@/lib/constants";
 import { loadDocuments, saveDocuments } from "@/lib/storage";
 import type { MechDocument } from "@/types";
 
+vi.mock("@/lib/cloud-library", () => ({
+  pullCloudDocuments: vi.fn(async () => ({ documents: [], cloudEnabled: false })),
+  pushCloudDocuments: vi.fn(async () => true),
+}));
+
 function doc(overrides: Partial<MechDocument>): MechDocument {
   return {
     id: "id",

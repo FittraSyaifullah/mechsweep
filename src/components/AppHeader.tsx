@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import LibrarySync from "@/components/LibrarySync";
 import Button from "@/components/ui/Button";
 import { ExportIcon, LogoMark } from "@/components/ui/Icons";
 
@@ -66,6 +67,7 @@ export default function AppHeader({
         </div>
 
         <div className="flex shrink-0 items-center gap-1.5 sm:gap-2">
+          <LibrarySync />
           <Link
             href="/libraries"
             className="rounded-lg px-2.5 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-100 hover:text-slate-900 sm:px-3 sm:text-sm"

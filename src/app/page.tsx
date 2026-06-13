@@ -32,7 +32,7 @@ export default function Home() {
     return (
       <main className="flex min-h-screen flex-col items-center justify-center gap-3 bg-slate-50">
         <Spinner className="h-7 w-7 text-mech-600" />
-        <p className="text-sm text-slate-500">Loading your library…</p>
+        <p className="text-sm text-slate-500">Loading and syncing your library…</p>
       </main>
     );
   }
