@@ -1,4 +1,4 @@
-import { MAX_LIBRARY_DOCUMENTS } from "@/lib/constants";
+import { LOCAL_STORAGE_BACKUP_MAX_CHARS, MAX_LIBRARY_DOCUMENTS } from "@/lib/constants";
 import { removeDuplicateDocuments } from "@/lib/duplicates";
 import type { MechDocument } from "@/types";
 
@@ -28,6 +28,37 @@ function trimToCapacity(docs: MechDocument[]): MechDocument[] {
   return normalized.slice(0, MAX_LIBRARY_DOCUMENTS);
 }
 
+function pickRicherDocument(a: MechDocument, b: MechDocument): MechDocument {
+  const rank = (doc: MechDocument) =>
+    doc.status === "ready" ? 3 : doc.status === "processing" ? 2 : doc.status === "pending" ? 1 : 0;
+  const rankA = rank(a);
+  const rankB = rank(b);
+  if (rankA !== rankB) return rankA > rankB ? a : b;
+  const lenA = a.content?.length ?? 0;
+  const lenB = b.content?.length ?? 0;
+  if (lenA !== lenB) return lenA > lenB ? a : b;
+  return a.addedAt >= b.addedAt ? a : b;
+}
+
+function librarySignature(docs: MechDocument[]): string {
+  return docs
+    .map(
+      (doc) =>
+        `${doc.id}:${doc.status}:${doc.content.length}:${doc.contentHash ?? ""}:${doc.addedAt}`
+    )
+    .join("|");
+}
+
+function mergePersistedLibraries(a: MechDocument[], b: MechDocument[]): MechDocument[] {
+  const merged = new Map<string, MechDocument>();
+  for (const doc of a) merged.set(doc.id, doc);
+  for (const doc of b) {
+    const existing = merged.get(doc.id);
+    merged.set(doc.id, existing ? pickRicherDocument(existing, doc) : doc);
+  }
+  return trimToCapacity(Array.from(merged.values()));
+}
+
 function loadFromLocalStorage(): MechDocument[] {
   if (typeof window === "undefined" || typeof localStorage === "undefined") return [];
   try {
@@ -41,13 +72,19 @@ function loadFromLocalStorage(): MechDocument[] {
   }
 }
 
-function saveToLocalStorage(docs: MechDocument[]): void {
+function maybeWriteLocalStorageBackup(docs: MechDocument[]): void {
   if (typeof window === "undefined" || typeof localStorage === "undefined") return;
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(trimToCapacity(docs)));
+    const payload = JSON.stringify(trimToCapacity(docs));
+    if (payload.length > LOCAL_STORAGE_BACKUP_MAX_CHARS) return;
+    localStorage.setItem(STORAGE_KEY, payload);
   } catch {
-    // localStorage quota exceeded — IndexedDB is the primary store.
+    // IndexedDB remains the source of truth for large libraries.
   }
+}
+
+function saveToLocalStorage(docs: MechDocument[]): void {
+  maybeWriteLocalStorageBackup(docs);
 }
 
 function openDatabase(): Promise<IDBDatabase> {
@@ -153,8 +190,20 @@ export function remainingLibraryCapacity(count: number): number {
   return Math.max(0, MAX_LIBRARY_DOCUMENTS - count);
 }
 
+/** Ask the browser not to evict this site's storage under memory pressure. */
+export async function requestPersistentLibraryStorage(): Promise<boolean> {
+  if (typeof navigator === "undefined" || !navigator.storage?.persist) return false;
+  try {
+    return await navigator.storage.persist();
+  } catch {
+    return false;
+  }
+}
+
 export async function loadDocuments(): Promise<MechDocument[]> {
   if (typeof window === "undefined") return [];
+
+  const backupDocs = loadFromLocalStorage();
 
   try {
     const db = await openDatabase();
@@ -165,18 +214,21 @@ export async function loadDocuments(): Promise<MechDocument[]> {
       if (migrated?.length) docs = migrated;
     }
 
-    if (docs.length === 0) {
-      const localDocs = loadFromLocalStorage();
-      if (localDocs.length > 0) {
-        await writeAllToLibraryStore(db, localDocs);
-        docs = localDocs;
-      }
+    if (docs.length === 0 && backupDocs.length > 0) {
+      await writeAllToLibraryStore(db, backupDocs);
+      docs = backupDocs;
     }
 
     db.close();
-    return trimToCapacity(docs);
+
+    const merged = mergePersistedLibraries(docs, backupDocs);
+    if (librarySignature(merged) !== librarySignature(docs)) {
+      await saveDocuments(merged);
+    }
+
+    return merged;
   } catch {
-    return loadFromLocalStorage();
+    return backupDocs;
   }
 }
 
@@ -188,9 +240,15 @@ export async function saveDocuments(docs: MechDocument[]): Promise<void> {
     const db = await openDatabase();
     await writeAllToLibraryStore(db, normalized);
     db.close();
+    maybeWriteLocalStorageBackup(normalized);
   } catch {
     saveToLocalStorage(normalized);
   }
+}
+
+/** Immediate persist — use on tab close and after critical updates. */
+export async function flushDocuments(docs: MechDocument[]): Promise<void> {
+  await saveDocuments(docs);
 }
 
 export async function upsertDocument(doc: MechDocument): Promise<void> {
@@ -228,8 +286,30 @@ export async function deleteDocuments(ids: string[]): Promise<void> {
       tx.onerror = () => reject(tx.error ?? new Error("IndexedDB delete failed"));
     });
     db.close();
+    const idSet = new Set(ids);
+    maybeWriteLocalStorageBackup(loadFromLocalStorage().filter((doc) => !idSet.has(doc.id)));
   } catch {
     const idSet = new Set(ids);
     saveToLocalStorage(loadFromLocalStorage().filter((doc) => !idSet.has(doc.id)));
+  }
+}
+
+export async function clearDocuments(): Promise<void> {
+  if (typeof window === "undefined") return;
+
+  try {
+    const db = await openDatabase();
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(LIBRARY_STORE, "readwrite");
+      tx.objectStore(LIBRARY_STORE).clear();
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error ?? new Error("IndexedDB clear failed"));
+    });
+    db.close();
+    if (typeof localStorage !== "undefined") {
+      localStorage.removeItem(STORAGE_KEY);
+    }
+  } catch {
+    saveToLocalStorage([]);
   }
 }

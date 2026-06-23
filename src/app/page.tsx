@@ -119,8 +119,7 @@ export default function Home() {
         confirmLabel="Clear all"
         variant="danger"
         onConfirm={() => {
-          library.setDocuments([]);
-          library.setSelectedDoc(null);
+          library.clearAll();
           library.setShowClearConfirm(false);
           toast("Library cleared", "info");
         }}

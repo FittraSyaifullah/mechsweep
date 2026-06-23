@@ -24,10 +24,15 @@ import {
   normalizeDocumentUrl,
 } from "@/lib/duplicates";
 import {
+  clearDocuments,
+  deleteDocuments,
+  flushDocuments,
   isLibraryAtCapacity,
   loadDocuments,
   remainingLibraryCapacity,
+  requestPersistentLibraryStorage,
   saveDocuments,
+  upsertDocument,
 } from "@/lib/storage";
 import type { AnalyzeResult, MechDocument, SweepResult } from "@/types";
 import type { UploadedFile } from "@/components/UploadZone";
@@ -50,9 +55,13 @@ export function useDocumentLibrary(options: UseDocumentLibraryOptions = {}) {
   const [pendingDeleteIds, setPendingDeleteIds] = useState<string[] | null>(null);
   const saveTimerRef = useRef<number | null>(null);
   const hydrateResumeDoneRef = useRef(false);
+  const documentsRef = useRef<MechDocument[]>([]);
+
+  documentsRef.current = documents;
 
   useEffect(() => {
     let active = true;
+    void requestPersistentLibraryStorage();
     void loadDocuments().then((docs) => {
       if (!active) return;
       const loaded = options.filterEmptySweepErrors
@@ -94,13 +103,41 @@ export function useDocumentLibrary(options: UseDocumentLibraryOptions = {}) {
 
     if (saveTimerRef.current) window.clearTimeout(saveTimerRef.current);
     saveTimerRef.current = window.setTimeout(() => {
-      void saveDocuments(documents);
+      saveTimerRef.current = null;
+      void saveDocuments(documentsRef.current);
     }, LIBRARY_SAVE_DEBOUNCE_MS);
 
     return () => {
-      if (saveTimerRef.current) window.clearTimeout(saveTimerRef.current);
+      if (saveTimerRef.current) {
+        window.clearTimeout(saveTimerRef.current);
+        saveTimerRef.current = null;
+      }
     };
   }, [documents, hydrated]);
+
+  useEffect(() => {
+    if (!hydrated) return;
+
+    const flush = () => {
+      if (saveTimerRef.current) {
+        window.clearTimeout(saveTimerRef.current);
+        saveTimerRef.current = null;
+      }
+      void flushDocuments(documentsRef.current);
+    };
+
+    window.addEventListener("pagehide", flush);
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "hidden") flush();
+    };
+    document.addEventListener("visibilitychange", onVisibilityChange);
+
+    return () => {
+      window.removeEventListener("pagehide", flush);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+      flush();
+    };
+  }, [hydrated]);
 
   useEffect(() => {
     if (!selectedDoc) return;
@@ -241,6 +278,7 @@ export function useDocumentLibrary(options: UseDocumentLibraryOptions = {}) {
         const docType = fetchData.type ?? result.type;
         const contentHash = await hashContent(content);
         let skippedDuplicate = false;
+        let persistedDoc: MechDocument | null = null;
 
         setDocuments((prev) => {
           const duplicate = findDuplicateDocument(
@@ -254,29 +292,30 @@ export function useDocumentLibrary(options: UseDocumentLibraryOptions = {}) {
             return prev.filter((doc) => doc.id !== id);
           }
 
-          return prev.map((d) =>
-            d.id === id
-              ? {
-                  ...d,
-                  type: docType,
-                  content,
-                  contentHash,
-                  prefetchedText: result.prefetchedText,
-                  category: d.category ?? result.category,
-                  sizeBytes: fetchData.sizeBytes,
-                  pageCount: fetchData.pageCount,
-                  pages: fetchData.pages,
-                  tables: fetchData.tables,
-                  detectedLanguage: fetchData.detectedLanguage,
-                  detectedUnits: fetchData.detectedUnits,
-                  ocrStatus: fetchData.ocrStatus,
-                  rowCount: fetchData.rowCount,
-                }
-              : d
-          );
+          return prev.map((d) => {
+            if (d.id !== id) return d;
+            persistedDoc = {
+              ...d,
+              type: docType,
+              content,
+              contentHash,
+              prefetchedText: result.prefetchedText,
+              category: d.category ?? result.category,
+              sizeBytes: fetchData.sizeBytes,
+              pageCount: fetchData.pageCount,
+              pages: fetchData.pages,
+              tables: fetchData.tables,
+              detectedLanguage: fetchData.detectedLanguage,
+              detectedUnits: fetchData.detectedUnits,
+              ocrStatus: fetchData.ocrStatus,
+              rowCount: fetchData.rowCount,
+            };
+            return persistedDoc;
+          });
         });
 
         if (skippedDuplicate) return;
+        if (persistedDoc) void upsertDocument(persistedDoc);
 
         await analyzeAndEmbed(id, content, result.title, docType, result.category);
       } catch (err) {
@@ -394,6 +433,8 @@ export function useDocumentLibrary(options: UseDocumentLibraryOptions = {}) {
       let skippedFull = false;
 
       try {
+        let nextDocs: MechDocument[] | null = null;
+
         setDocuments((prev) => {
           if (isLibraryAtCapacity(prev.length)) {
             skippedFull = true;
@@ -409,21 +450,20 @@ export function useDocumentLibrary(options: UseDocumentLibraryOptions = {}) {
             return prev;
           }
 
-          return [
-            {
-              id,
-              title: result.title,
-              type: result.type,
-              source: "sweep",
-              url: normalizedUrl,
-              content: "",
-              category: result.category,
-              prefetchedText: result.prefetchedText,
-              addedAt: new Date().toISOString(),
-              status: "processing",
-            },
-            ...prev,
-          ];
+          const newDoc: MechDocument = {
+            id,
+            title: result.title,
+            type: result.type,
+            source: "sweep",
+            url: normalizedUrl,
+            content: "",
+            category: result.category,
+            prefetchedText: result.prefetchedText,
+            addedAt: new Date().toISOString(),
+            status: "processing",
+          };
+          nextDocs = [newDoc, ...prev];
+          return nextDocs;
         });
 
         if (skippedFull) {
@@ -435,6 +475,8 @@ export function useDocumentLibrary(options: UseDocumentLibraryOptions = {}) {
           toast(`Already in library: ${result.title}`, "info");
           return;
         }
+
+        if (nextDocs?.[0]) void upsertDocument(nextDocs[0]);
 
         await fetchAndAnalyze(id, { ...result, url: normalizedUrl });
       } finally {
@@ -505,7 +547,11 @@ export function useDocumentLibrary(options: UseDocumentLibraryOptions = {}) {
         return;
       }
 
-      setDocuments((prev) => [...newDocs, ...prev]);
+      setDocuments((prev) => {
+        const next = [...newDocs, ...prev];
+        void flushDocuments(next);
+        return next;
+      });
       toast(
         skipped.length > 0
           ? `Added ${newDocs.length}; skipped ${skipped.length} duplicate(s)`
@@ -556,12 +602,20 @@ export function useDocumentLibrary(options: UseDocumentLibraryOptions = {}) {
 
   function confirmDelete() {
     if (!pendingDeleteIds?.length) return;
-    const idSet = new Set(pendingDeleteIds);
+    const ids = pendingDeleteIds;
+    const idSet = new Set(ids);
     setDocuments((prev) => prev.filter((doc) => !idSet.has(doc.id)));
     if (selectedDoc && idSet.has(selectedDoc.id)) setSelectedDoc(null);
-    toast(`Deleted ${pendingDeleteIds.length} doc${pendingDeleteIds.length !== 1 ? "s" : ""}`, "info");
+    void deleteDocuments(ids);
+    toast(`Deleted ${ids.length} doc${ids.length !== 1 ? "s" : ""}`, "info");
     setPendingDeleteIds(null);
   }
+
+  const clearAll = useCallback(() => {
+    setDocuments([]);
+    setSelectedDoc(null);
+    void clearDocuments();
+  }, []);
 
   function selectDoc(doc: MechDocument, searchQuery: string) {
     setSelectedDoc(doc);
@@ -608,6 +662,7 @@ export function useDocumentLibrary(options: UseDocumentLibraryOptions = {}) {
     requestRemoveDoc,
     requestBulkDelete,
     confirmDelete,
+    clearAll,
     selectDoc,
     openExport,
     bulkRetry,

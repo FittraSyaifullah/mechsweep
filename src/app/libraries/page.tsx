@@ -95,8 +95,7 @@ export default function LibrariesPage() {
         confirmLabel="Clear"
         variant="danger"
         onConfirm={() => {
-          library.setDocuments([]);
-          library.setSelectedDoc(null);
+          library.clearAll();
           library.setShowClearConfirm(false);
         }}
         onCancel={() => library.setShowClearConfirm(false)}

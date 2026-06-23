@@ -4,6 +4,9 @@ export const MAX_LIBRARY_DOCUMENTS = 15_000;
 /** Debounce delay before persisting library changes (ms). */
 export const LIBRARY_SAVE_DEBOUNCE_MS = 1000;
 
+/** Best-effort localStorage mirror when serialized library is below this size. */
+export const LOCAL_STORAGE_BACKUP_MAX_CHARS = 4_000_000;
+
 /** Default Exa results per API request (Exa max 100). */
 export const DEFAULT_SWEEP_MAX_RESULTS = 100;
 
