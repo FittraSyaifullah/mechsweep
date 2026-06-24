@@ -44,7 +44,7 @@ export default function AppHeader({
           : `${totalCount.toLocaleString()}`;
       return `${capacity} documents · ${readyCount} ready to export`;
     }
-    return `Store up to ${maxDocuments?.toLocaleString() ?? "15,000"} documents locally`;
+    return `Store up to ${maxDocuments?.toLocaleString() ?? "25,000"} documents locally`;
   })();
 
   return (

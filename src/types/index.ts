@@ -18,6 +18,10 @@ export interface MechDocument {
   source: DocSource;
   url?: string;
   content: string;
+  /** Character length when `content` is stored in OPFS. */
+  contentLength?: number;
+  /** True when heavy fields live in OPFS instead of IndexedDB. */
+  blobStored?: boolean;
   summary?: string;
   tags?: string[];
   keyTopics?: string[];

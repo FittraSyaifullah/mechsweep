@@ -1,3 +1,13 @@
+import {
+  clearDocumentBlobs,
+  deleteDocumentBlob,
+  documentHasBlobPayload,
+  extractDocumentBlob,
+  hydrateDocumentsFromBlobs,
+  isOpfsSupported,
+  syncDocumentBlobs,
+  writeDocumentBlob,
+} from "@/lib/document-blobs";
 import { LOCAL_STORAGE_BACKUP_MAX_CHARS, MAX_LIBRARY_DOCUMENTS } from "@/lib/constants";
 import { removeDuplicateDocuments } from "@/lib/duplicates";
 import type { MechDocument } from "@/types";
@@ -16,9 +26,13 @@ export class LibraryCapacityError extends Error {
   }
 }
 
+function contentLengthOf(doc: MechDocument): number {
+  return doc.contentLength ?? doc.content?.length ?? 0;
+}
+
 function normalizeDocuments(docs: MechDocument[]): MechDocument[] {
   return removeDuplicateDocuments(
-    docs.filter((doc) => !(doc.source === "sweep" && doc.status === "error" && !doc.content))
+    docs.filter((doc) => !(doc.source === "sweep" && doc.status === "error" && !contentLengthOf(doc)))
   );
 }
 
@@ -34,8 +48,8 @@ function pickRicherDocument(a: MechDocument, b: MechDocument): MechDocument {
   const rankA = rank(a);
   const rankB = rank(b);
   if (rankA !== rankB) return rankA > rankB ? a : b;
-  const lenA = a.content?.length ?? 0;
-  const lenB = b.content?.length ?? 0;
+  const lenA = contentLengthOf(a);
+  const lenB = contentLengthOf(b);
   if (lenA !== lenB) return lenA > lenB ? a : b;
   return a.addedAt >= b.addedAt ? a : b;
 }
@@ -44,7 +58,7 @@ function librarySignature(docs: MechDocument[]): string {
   return docs
     .map(
       (doc) =>
-        `${doc.id}:${doc.status}:${doc.content.length}:${doc.contentHash ?? ""}:${doc.addedAt}`
+        `${doc.id}:${doc.status}:${contentLengthOf(doc)}:${doc.contentHash ?? ""}:${doc.addedAt}:${doc.blobStored ? "b" : "i"}`
     )
     .join("|");
 }
@@ -57,6 +71,40 @@ function mergePersistedLibraries(a: MechDocument[], b: MechDocument[]): MechDocu
     merged.set(doc.id, existing ? pickRicherDocument(existing, doc) : doc);
   }
   return trimToCapacity(Array.from(merged.values()));
+}
+
+function toPersistedRecord(doc: MechDocument): MechDocument {
+  if (!isOpfsSupported() || !documentHasBlobPayload(doc)) {
+    return {
+      ...doc,
+      contentLength: contentLengthOf(doc),
+    };
+  }
+
+  return {
+    ...doc,
+    content: "",
+    pages: undefined,
+    tables: undefined,
+    prefetchedText: undefined,
+    embedding: undefined,
+    contentLength: doc.content.length,
+    blobStored: true,
+  };
+}
+
+function toBackupRecord(doc: MechDocument): MechDocument {
+  if (!documentHasBlobPayload(doc)) return doc;
+  return {
+    ...doc,
+    content: "",
+    pages: undefined,
+    tables: undefined,
+    prefetchedText: undefined,
+    embedding: undefined,
+    contentLength: contentLengthOf(doc),
+    blobStored: true,
+  };
 }
 
 function loadFromLocalStorage(): MechDocument[] {
@@ -75,7 +123,7 @@ function loadFromLocalStorage(): MechDocument[] {
 function maybeWriteLocalStorageBackup(docs: MechDocument[]): void {
   if (typeof window === "undefined" || typeof localStorage === "undefined") return;
   try {
-    const payload = JSON.stringify(trimToCapacity(docs));
+    const payload = JSON.stringify(trimToCapacity(docs).map(toBackupRecord));
     if (payload.length > LOCAL_STORAGE_BACKUP_MAX_CHARS) return;
     localStorage.setItem(STORAGE_KEY, payload);
   } catch {
@@ -154,13 +202,56 @@ async function migrateLegacyBlob(db: IDBDatabase): Promise<MechDocument[] | null
   return legacyDocs;
 }
 
-function writeAllToLibraryStore(db: IDBDatabase, docs: MechDocument[]): Promise<void> {
+async function migrateInlineRecordsToOpfs(
+  db: IDBDatabase,
+  docs: MechDocument[]
+): Promise<MechDocument[]> {
+  if (!isOpfsSupported()) return docs;
+
+  const migrated: MechDocument[] = [];
+  let changed = false;
+
+  for (const doc of docs) {
+    if (doc.blobStored || !documentHasBlobPayload(doc)) {
+      migrated.push(doc);
+      continue;
+    }
+
+    changed = true;
+    await writeDocumentBlob(doc.id, extractDocumentBlob(doc));
+    migrated.push(toPersistedRecord(doc));
+  }
+
+  if (!changed) return docs;
+
+  await putRecordsInLibraryStore(db, migrated);
+  return migrated;
+}
+
+function putRecordsInLibraryStore(db: IDBDatabase, records: MechDocument[]): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(LIBRARY_STORE, "readwrite");
+    const store = tx.objectStore(LIBRARY_STORE);
+    for (const record of records) {
+      store.put(record);
+    }
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error ?? new Error("IndexedDB write failed"));
+    tx.onabort = () => reject(tx.error ?? new Error("IndexedDB write aborted"));
+  });
+}
+
+async function writeAllToLibraryStore(db: IDBDatabase, docs: MechDocument[]): Promise<void> {
   const normalized = trimToCapacity(docs);
+  const keepIds = new Set(normalized.map((doc) => doc.id));
+
+  await syncDocumentBlobs(normalized, keepIds);
+
+  const records = normalized.map(toPersistedRecord);
 
   return new Promise((resolve, reject) => {
     const tx = db.transaction(LIBRARY_STORE, "readwrite");
     const store = tx.objectStore(LIBRARY_STORE);
-    const keepIds = new Set(normalized.map((doc) => doc.id));
 
     const clearRequest = store.getAllKeys();
     clearRequest.onsuccess = () => {
@@ -170,8 +261,8 @@ function writeAllToLibraryStore(db: IDBDatabase, docs: MechDocument[]): Promise<
         }
       }
 
-      for (const doc of normalized) {
-        store.put(doc);
+      for (const record of records) {
+        store.put(record);
       }
     };
     clearRequest.onerror = () => reject(clearRequest.error ?? new Error("IndexedDB key scan failed"));
@@ -180,6 +271,18 @@ function writeAllToLibraryStore(db: IDBDatabase, docs: MechDocument[]): Promise<
     tx.onerror = () => reject(tx.error ?? new Error("IndexedDB write failed"));
     tx.onabort = () => reject(tx.error ?? new Error("IndexedDB write aborted"));
   });
+}
+
+async function persistDocumentRecord(doc: MechDocument): Promise<void> {
+  if (documentHasBlobPayload(doc)) {
+    await syncDocumentBlobs([doc], new Set([doc.id]));
+  } else {
+    await deleteDocumentBlob(doc.id);
+  }
+
+  const db = await openDatabase();
+  await putRecordsInLibraryStore(db, [toPersistedRecord(doc)]);
+  db.close();
 }
 
 export function isLibraryAtCapacity(count: number): boolean {
@@ -215,20 +318,43 @@ export async function loadDocuments(): Promise<MechDocument[]> {
     }
 
     if (docs.length === 0 && backupDocs.length > 0) {
-      await writeAllToLibraryStore(db, backupDocs);
-      docs = backupDocs;
+      const hydratedBackup = await hydrateDocumentsFromBlobs(backupDocs);
+      await writeAllToLibraryStore(db, hydratedBackup);
+      docs = await readAllFromLibraryStore(db);
     }
 
+    docs = await migrateInlineRecordsToOpfs(db, docs);
     db.close();
 
     const merged = mergePersistedLibraries(docs, backupDocs);
+    const hydrated = await hydrateDocumentsFromBlobs(merged);
     if (librarySignature(merged) !== librarySignature(docs)) {
-      await saveDocuments(merged);
+      await saveDocuments(hydrated);
     }
 
-    return merged;
+    return hydrated;
   } catch {
-    return backupDocs;
+    return hydrateDocumentsFromBlobs(backupDocs);
+  }
+}
+
+export async function loadDocumentById(id: string): Promise<MechDocument | null> {
+  if (typeof window === "undefined") return null;
+
+  try {
+    const db = await openDatabase();
+    const doc = await new Promise<MechDocument | null>((resolve, reject) => {
+      const tx = db.transaction(LIBRARY_STORE, "readonly");
+      const request = tx.objectStore(LIBRARY_STORE).get(id);
+      request.onsuccess = () => resolve((request.result as MechDocument | undefined) ?? null);
+      request.onerror = () => reject(request.error ?? new Error("IndexedDB read failed"));
+    });
+    db.close();
+    if (!doc) return null;
+    const [hydrated] = await hydrateDocumentsFromBlobs([doc]);
+    return hydrated ?? null;
+  } catch {
+    return loadFromLocalStorage().find((doc) => doc.id === id) ?? null;
   }
 }
 
@@ -255,14 +381,7 @@ export async function upsertDocument(doc: MechDocument): Promise<void> {
   if (typeof window === "undefined") return;
 
   try {
-    const db = await openDatabase();
-    await new Promise<void>((resolve, reject) => {
-      const tx = db.transaction(LIBRARY_STORE, "readwrite");
-      tx.objectStore(LIBRARY_STORE).put(doc);
-      tx.oncomplete = () => resolve();
-      tx.onerror = () => reject(tx.error ?? new Error("IndexedDB upsert failed"));
-    });
-    db.close();
+    await persistDocumentRecord(doc);
   } catch {
     const existing = loadFromLocalStorage();
     const next = trimToCapacity([
@@ -277,6 +396,8 @@ export async function deleteDocuments(ids: string[]): Promise<void> {
   if (typeof window === "undefined" || ids.length === 0) return;
 
   try {
+    await Promise.all(ids.map((id) => deleteDocumentBlob(id)));
+
     const db = await openDatabase();
     await new Promise<void>((resolve, reject) => {
       const tx = db.transaction(LIBRARY_STORE, "readwrite");
@@ -286,6 +407,7 @@ export async function deleteDocuments(ids: string[]): Promise<void> {
       tx.onerror = () => reject(tx.error ?? new Error("IndexedDB delete failed"));
     });
     db.close();
+
     const idSet = new Set(ids);
     maybeWriteLocalStorageBackup(loadFromLocalStorage().filter((doc) => !idSet.has(doc.id)));
   } catch {
@@ -298,6 +420,8 @@ export async function clearDocuments(): Promise<void> {
   if (typeof window === "undefined") return;
 
   try {
+    await clearDocumentBlobs();
+
     const db = await openDatabase();
     await new Promise<void>((resolve, reject) => {
       const tx = db.transaction(LIBRARY_STORE, "readwrite");
@@ -306,6 +430,7 @@ export async function clearDocuments(): Promise<void> {
       tx.onerror = () => reject(tx.error ?? new Error("IndexedDB clear failed"));
     });
     db.close();
+
     if (typeof localStorage !== "undefined") {
       localStorage.removeItem(STORAGE_KEY);
     }
@@ -313,3 +438,5 @@ export async function clearDocuments(): Promise<void> {
     saveToLocalStorage([]);
   }
 }
+
+export { applyDocumentBlob, isOpfsSupported } from "@/lib/document-blobs";

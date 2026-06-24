@@ -1,6 +1,8 @@
 import "fake-indexeddb/auto";
 import { IDBFactory } from "fake-indexeddb";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { DocumentBlobPayload } from "@/lib/document-blobs";
+import { setDocumentBlobStoreForTests } from "@/lib/document-blobs";
 import { MAX_LIBRARY_DOCUMENTS } from "@/lib/constants";
 import {
   clearDocuments,
@@ -10,6 +12,29 @@ import {
   upsertDocument,
 } from "@/lib/storage";
 import type { MechDocument } from "@/types";
+
+function createMemoryBlobStore() {
+  const files = new Map<string, DocumentBlobPayload>();
+
+  return {
+    write: async (id: string, payload: DocumentBlobPayload) => {
+      files.set(id, payload);
+    },
+    read: async (id: string) => files.get(id) ?? null,
+    delete: async (id: string) => {
+      files.delete(id);
+    },
+    deleteExcept: async (keepIds: Set<string>) => {
+      for (const id of files.keys()) {
+        if (!keepIds.has(id)) files.delete(id);
+      }
+    },
+    clear: async () => {
+      files.clear();
+    },
+    files,
+  };
+}
 
 function doc(overrides: Partial<MechDocument>): MechDocument {
   return {
@@ -39,6 +64,7 @@ describe("storage (localStorage fallback)", () => {
   beforeEach(() => {
     setupBrowserGlobals();
     vi.stubGlobal("indexedDB", undefined);
+    setDocumentBlobStoreForTests(null);
   });
 
   it("loads an empty array when storage is invalid", async () => {
@@ -69,21 +95,16 @@ describe("storage (localStorage fallback)", () => {
 
     expect((await loadDocuments()).map((item) => item.id)).toEqual(["1"]);
   });
-
-  it("trims saves to the library capacity limit", async () => {
-    const docs = Array.from({ length: MAX_LIBRARY_DOCUMENTS + 5 }, (_, index) =>
-      doc({ id: `doc-${index}`, contentHash: `hash-${index}` })
-    );
-
-    await saveDocuments(docs);
-    expect((await loadDocuments()).length).toBe(MAX_LIBRARY_DOCUMENTS);
-  });
 });
 
 describe("storage (IndexedDB)", () => {
+  let blobStore = createMemoryBlobStore();
+
   beforeEach(() => {
+    blobStore = createMemoryBlobStore();
     setupBrowserGlobals();
     vi.stubGlobal("indexedDB", new IDBFactory());
+    setDocumentBlobStoreForTests(blobStore);
   });
 
   it("persists documents in IndexedDB", async () => {
@@ -94,6 +115,42 @@ describe("storage (IndexedDB)", () => {
 
     const loaded = await loadDocuments();
     expect(loaded.map((item) => item.id).sort()).toEqual(["1", "2"]);
+  });
+
+  it("stores heavy fields in OPFS and metadata in IndexedDB", async () => {
+    const heavy = "x".repeat(5000);
+    await saveDocuments([
+      doc({
+        id: "heavy-1",
+        content: heavy,
+        pages: [{ pageNumber: 1, text: "Page one" }],
+        embedding: [0.1, 0.2],
+      }),
+    ]);
+
+    expect(blobStore.files.get("heavy-1")?.content).toBe(heavy);
+
+    const db = await new Promise<IDBDatabase>((resolve, reject) => {
+      const request = indexedDB.open("mechsweep", 2);
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+    const record = await new Promise<MechDocument>((resolve, reject) => {
+      const tx = db.transaction("library", "readonly");
+      const request = tx.objectStore("library").get("heavy-1");
+      request.onsuccess = () => resolve(request.result as MechDocument);
+      request.onerror = () => reject(request.error);
+    });
+    db.close();
+
+    expect(record.blobStored).toBe(true);
+    expect(record.content).toBe("");
+    expect(record.contentLength).toBe(5000);
+    expect(record.embedding).toBeUndefined();
+
+    const loaded = await loadDocuments();
+    expect(loaded[0]?.content).toBe(heavy);
+    expect(loaded[0]?.pages?.[0]?.text).toBe("Page one");
   });
 
   it("upserts a single document without rewriting the full library", async () => {
@@ -121,6 +178,16 @@ describe("storage (IndexedDB)", () => {
     await saveDocuments([doc({ id: "1" }), doc({ id: "2" })]);
     await clearDocuments();
     expect(await loadDocuments()).toEqual([]);
+    expect(blobStore.files.size).toBe(0);
+  });
+
+  it("trims saves to the library capacity limit", async () => {
+    const docs = Array.from({ length: MAX_LIBRARY_DOCUMENTS + 5 }, (_, index) =>
+      doc({ id: `doc-${index}`, content: "", contentHash: `hash-${index}` })
+    );
+
+    await saveDocuments(docs);
+    expect((await loadDocuments()).length).toBe(MAX_LIBRARY_DOCUMENTS);
   });
 
   it("migrates localStorage backup into IndexedDB on first load", async () => {
