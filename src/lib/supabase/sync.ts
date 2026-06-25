@@ -1,4 +1,4 @@
-import { applyDocumentBlob, extractDocumentBlob, readDocumentBlob } from "@/lib/document-blobs";
+import { applyDocumentBlob, readDocumentBlob } from "@/lib/document-blobs";
 import { runWithConcurrency } from "@/lib/concurrency";
 import { MAX_LIBRARY_DOCUMENTS } from "@/lib/constants";
 import { removeDuplicateDocuments } from "@/lib/duplicates";
@@ -7,6 +7,8 @@ import type { MechDocument } from "@/types";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 const UPLOAD_CONCURRENCY = 5;
+const INDEX_BATCH_SIZE = 100;
+const DELETE_BATCH_SIZE = 100;
 const CLOUD_SYNC_VERSION = 1;
 
 export interface LibraryDocumentIndexRow {
@@ -91,14 +93,58 @@ function parseCloudPayload(raw: string): MechDocument | null {
   }
 }
 
+async function deleteStaleCloudDocuments(
+  supabase: SupabaseClient,
+  userId: string,
+  staleIds: string[],
+  onProgress?: (progress: CloudSyncProgress) => void
+): Promise<void> {
+  if (staleIds.length === 0) return;
+
+  onProgress?.({ phase: "delete", completed: 0, total: staleIds.length });
+
+  for (let i = 0; i < staleIds.length; i += DELETE_BATCH_SIZE) {
+    const batch = staleIds.slice(i, i + DELETE_BATCH_SIZE);
+    const { error: indexError } = await supabase
+      .from("library_documents")
+      .delete()
+      .eq("user_id", userId)
+      .in("document_id", batch);
+    if (indexError) throw new Error(indexError.message);
+
+    const { error: storageError } = await supabase.storage
+      .from(LIBRARY_BLOBS_BUCKET)
+      .remove(batch.map((id) => blobPath(userId, id)));
+    if (storageError) throw new Error(storageError.message);
+
+    onProgress?.({
+      phase: "delete",
+      completed: Math.min(i + batch.length, staleIds.length),
+      total: staleIds.length,
+    });
+  }
+}
+
+export async function fetchCloudLibraryCount(
+  supabase: SupabaseClient,
+  userId: string
+): Promise<number> {
+  const { count, error } = await supabase
+    .from("library_documents")
+    .select("*", { count: "exact", head: true })
+    .eq("user_id", userId);
+
+  if (error) throw new Error(error.message);
+  return count ?? 0;
+}
+
 export async function uploadLibraryToSupabase(
   supabase: SupabaseClient,
   userId: string,
   docs: MechDocument[],
   onProgress?: (progress: CloudSyncProgress) => void
 ): Promise<void> {
-  const hydrated = await Promise.all(docs.map((doc) => hydrateDocumentForCloud(doc)));
-  const localIds = new Set(hydrated.map((doc) => doc.id));
+  const localIds = new Set(docs.map((doc) => doc.id));
 
   const { data: remoteRows, error: listError } = await supabase
     .from("library_documents")
@@ -109,53 +155,49 @@ export async function uploadLibraryToSupabase(
 
   const remoteIds = (remoteRows ?? []).map((row) => row.document_id as string);
   const staleIds = remoteIds.filter((id) => !localIds.has(id));
-
-  if (staleIds.length > 0) {
-    onProgress?.({ phase: "delete", completed: 0, total: staleIds.length });
-    await supabase.from("library_documents").delete().eq("user_id", userId).in("document_id", staleIds);
-    await supabase.storage.from(LIBRARY_BLOBS_BUCKET).remove(staleIds.map((id) => blobPath(userId, id)));
-  }
-
-  const indexRows = hydrated.map((doc) => toIndexRow(userId, doc));
-  onProgress?.({ phase: "index", completed: 0, total: indexRows.length });
-
-  for (let i = 0; i < indexRows.length; i += 200) {
-    const batch = indexRows.slice(i, i + 200);
-    const { error } = await supabase.from("library_documents").upsert(batch, {
-      onConflict: "user_id,document_id",
-    });
-    if (error) throw new Error(error.message);
-    onProgress?.({
-      phase: "index",
-      completed: Math.min(i + batch.length, indexRows.length),
-      total: indexRows.length,
-    });
-  }
+  await deleteStaleCloudDocuments(supabase, userId, staleIds, onProgress);
 
   let uploaded = 0;
-  onProgress?.({ phase: "upload", completed: 0, total: hydrated.length });
+  onProgress?.({ phase: "upload", completed: 0, total: docs.length });
 
-  await runWithConcurrency(hydrated, UPLOAD_CONCURRENCY, async (doc) => {
-    const payload: CloudDocumentPayload = {
-      version: CLOUD_SYNC_VERSION,
-      document: {
-        ...doc,
-        blobStored: undefined,
-        contentLength: contentLengthOf(doc),
-      },
-    };
+  for (let offset = 0; offset < docs.length; offset += INDEX_BATCH_SIZE) {
+    const batch = docs.slice(offset, offset + INDEX_BATCH_SIZE);
+    const hydrated = await Promise.all(batch.map((doc) => hydrateDocumentForCloud(doc)));
 
-    const { error } = await supabase.storage
-      .from(LIBRARY_BLOBS_BUCKET)
-      .upload(blobPath(userId, doc.id), JSON.stringify(payload), {
-        upsert: true,
-        contentType: "application/json",
-      });
+    const { error: indexError } = await supabase.from("library_documents").upsert(
+      hydrated.map((doc) => toIndexRow(userId, doc)),
+      { onConflict: "user_id,document_id" }
+    );
+    if (indexError) throw new Error(indexError.message);
 
-    if (error) throw new Error(error.message);
-    uploaded += 1;
-    onProgress?.({ phase: "upload", completed: uploaded, total: hydrated.length });
-  });
+    onProgress?.({
+      phase: "index",
+      completed: Math.min(offset + batch.length, docs.length),
+      total: docs.length,
+    });
+
+    await runWithConcurrency(hydrated, UPLOAD_CONCURRENCY, async (doc) => {
+      const payload: CloudDocumentPayload = {
+        version: CLOUD_SYNC_VERSION,
+        document: {
+          ...doc,
+          blobStored: undefined,
+          contentLength: contentLengthOf(doc),
+        },
+      };
+
+      const { error } = await supabase.storage
+        .from(LIBRARY_BLOBS_BUCKET)
+        .upload(blobPath(userId, doc.id), JSON.stringify(payload), {
+          upsert: true,
+          contentType: "application/json",
+        });
+
+      if (error) throw new Error(error.message);
+      uploaded += 1;
+      onProgress?.({ phase: "upload", completed: uploaded, total: docs.length });
+    });
+  }
 }
 
 export async function downloadLibraryFromSupabase(

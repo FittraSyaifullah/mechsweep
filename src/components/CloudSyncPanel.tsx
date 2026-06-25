@@ -1,11 +1,12 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Button from "@/components/ui/Button";
 import { Spinner } from "@/components/ui/Icons";
 import { useToast } from "@/components/Toast";
 import { useSupabase } from "@/contexts/SupabaseProvider";
 import {
+  fetchCloudLibraryCount,
   pullAndMergeLibrary,
   uploadLibraryToSupabase,
   type CloudSyncProgress,
@@ -43,8 +44,32 @@ export default function CloudSyncPanel({ documents, onLibraryMerged }: CloudSync
   const [syncing, setSyncing] = useState(false);
   const [progress, setProgress] = useState<CloudSyncProgress | null>(null);
   const [syncError, setSyncError] = useState<string | null>(null);
+  const [cloudCount, setCloudCount] = useState<number | null>(null);
+  const [cloudCountLoading, setCloudCountLoading] = useState(false);
 
-  if (!configured) return null;
+  useEffect(() => {
+    if (!open || !client || !user) {
+      setCloudCount(null);
+      return;
+    }
+
+    let active = true;
+    setCloudCountLoading(true);
+    void fetchCloudLibraryCount(client, user.id)
+      .then((count) => {
+        if (active) setCloudCount(count);
+      })
+      .catch(() => {
+        if (active) setCloudCount(null);
+      })
+      .finally(() => {
+        if (active) setCloudCountLoading(false);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [open, client, user]);
 
   async function handleAuthSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -60,14 +85,14 @@ export default function CloudSyncPanel({ documents, onLibraryMerged }: CloudSync
     if (mode === "sign-in") {
       const result = await signIn(trimmedEmail, password);
       if (result.error) setAuthError(result.error);
-      else setOpen(false);
+      else setOpen(true);
       return;
     }
 
     const result = await signUp(trimmedEmail, password);
     if (result.error) setAuthError(result.error);
     else if (result.message) setAuthMessage(result.message);
-    else setOpen(false);
+    else setOpen(true);
   }
 
   async function handleUpload() {
@@ -77,6 +102,7 @@ export default function CloudSyncPanel({ documents, onLibraryMerged }: CloudSync
     setProgress(null);
     try {
       await uploadLibraryToSupabase(client, user.id, documents, setProgress);
+      setCloudCount(documents.length);
       toast(`Uploaded ${documents.length.toLocaleString()} documents to cloud`, "success");
       setOpen(false);
     } catch (err) {
@@ -112,14 +138,18 @@ export default function CloudSyncPanel({ documents, onLibraryMerged }: CloudSync
         onClick={() => setOpen((current) => !current)}
         aria-expanded={open}
         aria-haspopup="dialog"
-        aria-label={user ? "Cloud sync options" : "Sign in to cloud sync"}
+        aria-label={
+          !configured
+            ? "Supabase cloud sync setup"
+            : user
+              ? "Cloud sync options"
+              : "Sign in to cloud sync"
+        }
       >
         {loading ? (
           <Spinner className="h-4 w-4" aria-hidden="true" />
-        ) : user ? (
-          "Cloud"
         ) : (
-          "Sign in"
+          "Cloud"
         )}
       </Button>
 
@@ -137,20 +167,55 @@ export default function CloudSyncPanel({ documents, onLibraryMerged }: CloudSync
             aria-label="Cloud library sync"
             className="absolute right-0 top-full z-50 mt-2 w-[min(22rem,calc(100vw-2rem))] rounded-xl border border-slate-200 bg-white p-4 shadow-float"
           >
-            {user ? (
+            {!configured ? (
+              <div className="space-y-3">
+                <div>
+                  <p className="text-sm font-semibold text-slate-900">Connect Supabase</p>
+                  <p className="mt-1 text-xs leading-relaxed text-slate-600">
+                    Add these to <code className="rounded bg-slate-100 px-1">.env.local</code>{" "}
+                    (and Vercel env vars for production), then restart the app:
+                  </p>
+                </div>
+                <pre className="overflow-x-auto rounded-lg bg-slate-900 p-3 text-[11px] leading-relaxed text-slate-100">
+                  {`NEXT_PUBLIC_SUPABASE_URL=\n  https://YOUR-PROJECT.supabase.co\nNEXT_PUBLIC_SUPABASE_ANON_KEY=\n  eyJ...your-anon-key`}
+                </pre>
+                <p className="text-xs text-slate-600">
+                  Run <code className="rounded bg-slate-100 px-1">supabase/migrations/001_library.sql</code>{" "}
+                  in the Supabase SQL Editor, then enable Email auth.
+                </p>
+              </div>
+            ) : user ? (
               <div className="space-y-3">
                 <div>
                   <p className="text-sm font-semibold text-slate-900">Cloud library</p>
                   <p className="mt-0.5 truncate text-xs text-slate-600">{user.email}</p>
+                  <p className="mt-1 text-xs text-slate-500">
+                    Local: {documents.length.toLocaleString()} · Cloud:{" "}
+                    {cloudCountLoading
+                      ? "…"
+                      : cloudCount != null
+                        ? cloudCount.toLocaleString()
+                        : "—"}
+                  </p>
                 </div>
 
+                {documents.length === 0 && cloudCount != null && cloudCount > 0 && (
+                  <p className="rounded-lg border border-mech-200 bg-mech-50 px-3 py-2 text-xs text-mech-800">
+                    Your cloud library has {cloudCount.toLocaleString()} documents. Use Download
+                    &amp; merge to restore them on this device.
+                  </p>
+                )}
+
                 <p className="text-xs leading-relaxed text-slate-600">
-                  Sync your library to Supabase. Upload sends this device&apos;s library to the
-                  cloud. Download merges cloud documents with local ones.
+                  Upload replaces your cloud library with this device. Download merges cloud
+                  documents with local ones.
                 </p>
 
                 {syncError && (
-                  <p className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700" role="alert">
+                  <p
+                    className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700"
+                    role="alert"
+                  >
                     {syncError}
                   </p>
                 )}
@@ -175,7 +240,11 @@ export default function CloudSyncPanel({ documents, onLibraryMerged }: CloudSync
                     size="sm"
                     variant="secondary"
                     onClick={() => void handleDownload()}
-                    disabled={syncing}
+                    disabled={
+                      syncing ||
+                      cloudCountLoading ||
+                      (cloudCount !== null && cloudCount === 0)
+                    }
                     loading={syncing && progress?.phase !== "upload"}
                   >
                     Download &amp; merge
@@ -193,9 +262,9 @@ export default function CloudSyncPanel({ documents, onLibraryMerged }: CloudSync
             ) : (
               <form className="space-y-3" onSubmit={(e) => void handleAuthSubmit(e)}>
                 <div>
-                  <p className="text-sm font-semibold text-slate-900">Supabase sign in</p>
+                  <p className="text-sm font-semibold text-slate-900">Sign in to Supabase</p>
                   <p className="mt-0.5 text-xs text-slate-600">
-                    Access your library from any device.
+                    Sync your library across devices.
                   </p>
                 </div>
 
@@ -251,7 +320,9 @@ export default function CloudSyncPanel({ documents, onLibraryMerged }: CloudSync
                     }}
                     className="text-xs font-semibold text-mech-700 hover:text-mech-900"
                   >
-                    {mode === "sign-in" ? "Need an account? Sign up" : "Already have an account? Sign in"}
+                    {mode === "sign-in"
+                      ? "Need an account? Sign up"
+                      : "Already have an account? Sign in"}
                   </button>
                 </div>
               </form>

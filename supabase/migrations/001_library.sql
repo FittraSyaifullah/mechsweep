@@ -1,5 +1,5 @@
 -- MechSweep cloud library: index rows + blob storage per user.
--- Run in Supabase SQL Editor or via supabase db push.
+-- Run in Supabase SQL Editor (safe to re-run).
 
 create table if not exists public.library_documents (
   user_id uuid not null references auth.users (id) on delete cascade,
@@ -15,6 +15,11 @@ create index if not exists library_documents_user_updated_idx
   on public.library_documents (user_id, updated_at desc);
 
 alter table public.library_documents enable row level security;
+
+drop policy if exists "Users read own library index" on public.library_documents;
+drop policy if exists "Users insert own library index" on public.library_documents;
+drop policy if exists "Users update own library index" on public.library_documents;
+drop policy if exists "Users delete own library index" on public.library_documents;
 
 create policy "Users read own library index"
   on public.library_documents
@@ -39,6 +44,11 @@ create policy "Users delete own library index"
 insert into storage.buckets (id, name, public, file_size_limit)
 values ('library-blobs', 'library-blobs', false, 52428800)
 on conflict (id) do nothing;
+
+drop policy if exists "Users read own library blobs" on storage.objects;
+drop policy if exists "Users upload own library blobs" on storage.objects;
+drop policy if exists "Users update own library blobs" on storage.objects;
+drop policy if exists "Users delete own library blobs" on storage.objects;
 
 create policy "Users read own library blobs"
   on storage.objects
