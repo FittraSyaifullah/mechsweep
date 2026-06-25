@@ -2,6 +2,7 @@
 
 import { useDeferredValue, useEffect, useMemo, useState } from "react";
 import DocCard from "@/components/DocCard";
+import LibraryStats from "@/components/LibraryStats";
 import EmptyState from "@/components/ui/EmptyState";
 import { GridIcon, Spinner } from "@/components/ui/Icons";
 import { MAX_LIBRARY_DOCUMENTS } from "@/lib/constants";
@@ -74,6 +75,7 @@ export default function DocLibrary({
   const [selectionMode, setSelectionMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [semanticLoading, setSemanticLoading] = useState(false);
+  const [showMoreFilters, setShowMoreFilters] = useState(false);
   const deferredSearch = useDeferredValue(search);
 
   useEffect(() => {
@@ -202,9 +204,132 @@ export default function DocLibrary({
   const lastVisible = Math.min(page * PAGE_SIZE, filtered.length);
   const selectedDocs = documents.filter((doc) => selectedIds.has(doc.id));
 
+  const hasActiveFilters =
+    Boolean(deferredSearch.trim()) ||
+    statusFilter !== "all" ||
+    typeFilter !== "all" ||
+    sourceFilter !== "all" ||
+    categoryFilter !== "all" ||
+    tagFilter !== "all" ||
+    dateFilter !== "all" ||
+    exportedFilter !== "all" ||
+    searchMode !== "keyword" ||
+    Boolean(domainFilter);
+
+  function clearAllFilters() {
+    setSearch("");
+    setStatusFilter("all");
+    setTypeFilter("all");
+    setSourceFilter("all");
+    setCategoryFilter("all");
+    setTagFilter("all");
+    setDateFilter("all");
+    setExportedFilter("all");
+    setSearchMode("keyword");
+    onClearDomainFilter?.();
+  }
+
+  type FilterChip = { key: string; label: string; onClear: () => void };
+
+  const activeFilterChips = useMemo((): FilterChip[] => {
+    const chips: FilterChip[] = [];
+    const q = deferredSearch.trim();
+    if (q) chips.push({ key: "search", label: `Search: “${q}”`, onClear: () => setSearch("") });
+    if (searchMode !== "keyword") {
+      chips.push({
+        key: "searchMode",
+        label: "Semantic search",
+        onClear: () => setSearchMode("keyword"),
+      });
+    }
+    if (statusFilter !== "all") {
+      chips.push({
+        key: "status",
+        label: `Status: ${statusFilter}`,
+        onClear: () => setStatusFilter("all"),
+      });
+    }
+    if (typeFilter !== "all") {
+      chips.push({
+        key: "type",
+        label: `Type: ${docTypeLabel(typeFilter)}`,
+        onClear: () => setTypeFilter("all"),
+      });
+    }
+    if (sourceFilter !== "all") {
+      chips.push({
+        key: "source",
+        label: `Source: ${sourceFilter}`,
+        onClear: () => setSourceFilter("all"),
+      });
+    }
+    if (categoryFilter !== "all") {
+      chips.push({
+        key: "category",
+        label: `Category: ${categoryFilter}`,
+        onClear: () => setCategoryFilter("all"),
+      });
+    }
+    if (domainFilter) {
+      chips.push({
+        key: "domain",
+        label: `Domain: ${domainFilter}`,
+        onClear: () => onClearDomainFilter?.(),
+      });
+    }
+    if (tagFilter !== "all") {
+      chips.push({ key: "tag", label: `Tag: ${tagFilter}`, onClear: () => setTagFilter("all") });
+    }
+    if (dateFilter !== "all") {
+      const dateLabels: Record<DateFilter, string> = {
+        all: "Any date",
+        "7": "Last 7 days",
+        "30": "Last 30 days",
+        "365": "Last year",
+      };
+      chips.push({
+        key: "date",
+        label: dateLabels[dateFilter],
+        onClear: () => setDateFilter("all"),
+      });
+    }
+    if (exportedFilter !== "all") {
+      chips.push({
+        key: "exported",
+        label: exportedFilter === "exported" ? "Exported only" : "Not exported",
+        onClear: () => setExportedFilter("all"),
+      });
+    }
+    return chips;
+  }, [
+    deferredSearch,
+    searchMode,
+    statusFilter,
+    typeFilter,
+    sourceFilter,
+    categoryFilter,
+    domainFilter,
+    tagFilter,
+    dateFilter,
+    exportedFilter,
+    onClearDomainFilter,
+  ]);
+
   useEffect(() => {
     setPage(1);
-  }, [search, statusFilter, typeFilter, sourceFilter, categoryFilter, tagFilter, dateFilter, sortBy]);
+  }, [
+    search,
+    statusFilter,
+    typeFilter,
+    sourceFilter,
+    categoryFilter,
+    tagFilter,
+    dateFilter,
+    exportedFilter,
+    sortBy,
+    searchMode,
+    domainFilter,
+  ]);
 
   useEffect(() => {
     setPage((current) => Math.min(current, pageCount));
@@ -258,7 +383,9 @@ export default function DocLibrary({
   }
 
   return (
-    <section className="mt-8" id="main-content" aria-label="Document library">
+    <section className="mt-8 scroll-mt-24" id="main-content" aria-label="Document library">
+      <LibraryStats documents={documents} />
+
       <div className="mb-3 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <h2 className="text-base font-semibold text-slate-900">
@@ -305,7 +432,7 @@ export default function DocLibrary({
               type="button"
               onClick={() => onBulkExport?.(selectedDocs)}
               disabled={selectedDocs.length === 0 || !onBulkExport}
-              className="rounded-lg bg-white px-3 py-1.5 font-medium text-slate-700 disabled:cursor-not-allowed disabled:opacity-40"
+              className="action-chip border border-slate-300 bg-white text-slate-800 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
             >
               Export
             </button>
@@ -313,7 +440,7 @@ export default function DocLibrary({
               type="button"
               onClick={() => onBulkRetry?.(selectedDocs)}
               disabled={selectedDocs.length === 0 || !onBulkRetry}
-              className="rounded-lg bg-white px-3 py-1.5 font-medium text-slate-700 disabled:cursor-not-allowed disabled:opacity-40"
+              className="action-chip border border-slate-300 bg-white text-slate-800 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
             >
               Re-analyze
             </button>
@@ -324,14 +451,14 @@ export default function DocLibrary({
                 clearSelection();
               }}
               disabled={selectedDocs.length === 0 || !onBulkDelete}
-              className="rounded-lg bg-white px-3 py-1.5 font-medium text-red-600 disabled:cursor-not-allowed disabled:opacity-40"
+              className="action-chip border border-red-200 bg-white text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-40"
             >
               Delete
             </button>
             <button
               type="button"
               onClick={clearSelection}
-              className="rounded-lg px-3 py-1.5 font-medium text-mech-700 hover:bg-white/60"
+              className="action-chip text-mech-800 hover:bg-white/60"
             >
               Clear
             </button>
@@ -350,22 +477,51 @@ export default function DocLibrary({
       {domainFilter && (
         <div className="mb-4 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-mech-200 bg-mech-50 px-3 py-2 text-sm text-mech-800">
           <span>
-            Showing <strong>{domainFilter}</strong> documents from chart
+            Chart filter: <strong>{domainFilter}</strong>
           </span>
           <button
             type="button"
             onClick={onClearDomainFilter}
-            className="rounded-md bg-white px-2.5 py-1 text-xs font-medium text-mech-700 ring-1 ring-mech-200 hover:bg-mech-100"
+            className="action-chip border border-mech-200 bg-white text-mech-800 hover:bg-mech-100"
           >
-            Clear filter
+            Clear
           </button>
         </div>
       )}
 
-      <fieldset className="mb-4 space-y-3 border-0 p-0">
+      {activeFilterChips.length > 0 && (
+        <div className="mb-4 flex flex-wrap items-center gap-2">
+          <span className="text-xs font-medium text-slate-600">Active filters:</span>
+          {activeFilterChips.map((chip) => (
+            <button
+              key={chip.key}
+              type="button"
+              onClick={chip.onClear}
+              className="filter-chip"
+              aria-label={`Remove filter ${chip.label}`}
+            >
+              {chip.label}
+              <span aria-hidden="true" className="ml-1 text-slate-500">
+                ×
+              </span>
+            </button>
+          ))}
+          {activeFilterChips.length > 1 && (
+            <button
+              type="button"
+              onClick={clearAllFilters}
+              className="text-xs font-semibold text-mech-700 hover:text-mech-900"
+            >
+              Clear all
+            </button>
+          )}
+        </div>
+      )}
+
+      <fieldset className="mb-4 space-y-3 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
         <legend className="sr-only">Search and filter documents</legend>
 
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-[1fr_auto_auto_auto_auto]">
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-[1fr_auto_auto_auto]">
           <div>
             <label htmlFor="library-search" className="filter-label">
               Search
@@ -411,24 +567,6 @@ export default function DocLibrary({
             </select>
           </div>
           <div>
-            <label htmlFor="library-type" className="filter-label">
-              Type
-            </label>
-            <select
-              id="library-type"
-              value={typeFilter}
-              onChange={(e) => setTypeFilter(e.target.value as DocType | "all")}
-              className="select-base"
-            >
-              <option value="all">All types</option>
-              {DOC_TYPES.map((type) => (
-                <option key={type} value={type}>
-                  {docTypeLabel(type)}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div>
             <label htmlFor="library-sort" className="filter-label">
               Sort
             </label>
@@ -446,7 +584,52 @@ export default function DocLibrary({
           </div>
         </div>
 
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+        <div className="flex flex-wrap items-center justify-between gap-2 border-t border-slate-100 pt-3">
+          <button
+            type="button"
+            onClick={() => setShowMoreFilters((current) => !current)}
+            className="text-sm font-semibold text-mech-700 hover:text-mech-900"
+            aria-expanded={showMoreFilters}
+            aria-controls="library-more-filters"
+          >
+            {showMoreFilters ? "Hide filters" : "More filters"}
+            {!showMoreFilters && hasActiveFilters && (
+              <span className="ml-1.5 rounded-full bg-mech-100 px-2 py-0.5 text-xs text-mech-800">
+                active
+              </span>
+            )}
+          </button>
+          {hasActiveFilters && (
+            <button
+              type="button"
+              onClick={clearAllFilters}
+              className="text-sm font-semibold text-slate-600 hover:text-slate-900"
+            >
+              Reset filters
+            </button>
+          )}
+        </div>
+
+        {showMoreFilters && (
+          <div id="library-more-filters" className="grid gap-3 border-t border-slate-100 pt-3 sm:grid-cols-2 lg:grid-cols-5">
+          <div>
+            <label htmlFor="library-type" className="filter-label">
+              Type
+            </label>
+            <select
+              id="library-type"
+              value={typeFilter}
+              onChange={(e) => setTypeFilter(e.target.value as DocType | "all")}
+              className="select-base"
+            >
+              <option value="all">All types</option>
+              {DOC_TYPES.map((type) => (
+                <option key={type} value={type}>
+                  {docTypeLabel(type)}
+                </option>
+              ))}
+            </select>
+          </div>
           <div>
             <label htmlFor="library-category" className="filter-label">
               Category
@@ -529,7 +712,8 @@ export default function DocLibrary({
               <option value="not-exported">Not exported</option>
             </select>
           </div>
-        </div>
+          </div>
+        )}
       </fieldset>
 
       {semanticLoading && deferredSearch.trim() && searchMode === "semantic" && (
@@ -553,11 +737,22 @@ export default function DocLibrary({
       )}
 
       {filtered.length === 0 ? (
-        <p className="rounded-lg bg-slate-200 py-8 text-center text-sm font-medium text-slate-700">
-          {semanticLoading && deferredSearch.trim() && searchMode === "semantic"
-            ? "Searching by meaning…"
-            : "No documents match your filters."}
-        </p>
+        <div className="rounded-xl border border-dashed border-slate-300 bg-white py-10 text-center">
+          <p className="text-sm font-medium text-slate-700">
+            {semanticLoading && deferredSearch.trim() && searchMode === "semantic"
+              ? "Searching by meaning…"
+              : "No documents match your filters."}
+          </p>
+          {hasActiveFilters && !semanticLoading && (
+            <button
+              type="button"
+              onClick={clearAllFilters}
+              className="action-chip mt-4 border border-slate-300 bg-white text-slate-800 hover:bg-slate-50"
+            >
+              Clear all filters
+            </button>
+          )}
+        </div>
       ) : (
         <>
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">

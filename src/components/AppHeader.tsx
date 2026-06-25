@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 import Button from "@/components/ui/Button";
 import { ExportIcon, LogoMark } from "@/components/ui/Icons";
 
@@ -23,6 +24,8 @@ export default function AppHeader({
   onClearAll,
   maxWidth = "3xl",
 }: AppHeaderProps) {
+  const pathname = usePathname();
+  const onLibrariesPage = pathname === "/libraries";
   const widthClass = maxWidth === "6xl" ? "max-w-6xl" : "max-w-3xl";
 
   const statusLine = (() => {
@@ -77,7 +80,12 @@ export default function AppHeader({
         >
           <Link
             href="/libraries"
-            className="touch-target rounded-lg px-3 text-sm font-semibold text-slate-700 hover:bg-slate-100 hover:text-slate-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-mech-500 focus-visible:ring-offset-2"
+            aria-current={onLibrariesPage ? "page" : undefined}
+            className={`touch-target rounded-lg px-3 text-sm font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-mech-500 focus-visible:ring-offset-2 ${
+              onLibrariesPage
+                ? "bg-mech-50 text-mech-800"
+                : "text-slate-700 hover:bg-slate-100 hover:text-slate-900"
+            }`}
           >
             Library
           </Link>

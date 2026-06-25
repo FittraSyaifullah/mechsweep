@@ -172,6 +172,7 @@ export default function UploadZone({ onUpload }: UploadZoneProps) {
       <div
         role="button"
         tabIndex={0}
+        aria-label="Upload files by clicking or dragging and dropping"
         onClick={() => !processing && inputRef.current?.click()}
         onKeyDown={(e) => e.key === "Enter" && !processing && inputRef.current?.click()}
         onDragOver={(e) => {

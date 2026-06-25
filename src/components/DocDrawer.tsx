@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { MechDocument } from "@/types";
 import HighlightText from "@/components/HighlightText";
 import Button from "@/components/ui/Button";
@@ -29,6 +29,8 @@ export default function DocDrawer({
   onExport,
 }: DocDrawerProps) {
   const [copied, setCopied] = useState(false);
+  const closeRef = useRef<HTMLButtonElement>(null);
+  const titleId = doc ? `drawer-title-${doc.id}` : undefined;
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
@@ -37,6 +39,7 @@ export default function DocDrawer({
     if (doc) {
       document.addEventListener("keydown", onKey);
       document.body.style.overflow = "hidden";
+      closeRef.current?.focus();
     }
     return () => {
       document.removeEventListener("keydown", onKey);
@@ -59,14 +62,19 @@ export default function DocDrawer({
 
   return (
     <div className="fixed inset-0 z-50 flex justify-end">
-      <div className="absolute inset-0 bg-black/40" onClick={onClose} aria-hidden />
-      <aside className="relative flex h-full w-full max-w-lg flex-col bg-white shadow-xl animate-slide-left">
+      <div className="absolute inset-0 bg-black/40" onClick={onClose} aria-hidden="true" />
+      <aside
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        className="relative flex h-full w-full max-w-lg flex-col bg-white shadow-xl animate-slide-left"
+      >
         <header className="flex items-start justify-between gap-3 border-b border-slate-200 px-5 py-4">
           <div className="min-w-0">
-            <p className="text-xs font-medium uppercase tracking-wide text-slate-400">
+            <p className="text-xs font-medium uppercase tracking-wide text-slate-500">
               {doc.type} · {statusText(doc)}
             </p>
-            <h2 className="mt-1 text-lg font-semibold text-slate-900">
+            <h2 id={titleId} className="mt-1 text-lg font-semibold text-slate-900">
               <HighlightText text={doc.title} query={searchQuery} />
             </h2>
             {doc.category && (
@@ -88,10 +96,11 @@ export default function DocDrawer({
             )}
           </div>
           <button
+            ref={closeRef}
             type="button"
             onClick={onClose}
-            className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-600"
-            aria-label="Close"
+            className="touch-target rounded-lg text-slate-500 hover:bg-slate-100 hover:text-slate-700"
+            aria-label="Close document preview"
           >
             <CloseIcon className="h-5 w-5" />
           </button>

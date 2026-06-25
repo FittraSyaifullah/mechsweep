@@ -27,6 +27,7 @@ const SUGGESTIONS = [
 interface SweepPanelProps {
   onAdd: (result: SweepResult) => Promise<void>;
   addedUrls: Set<string>;
+  onAddedToLibrary?: (count: number) => void;
 }
 
 function providerLabel(provider: string | null): string {
@@ -36,7 +37,7 @@ function providerLabel(provider: string | null): string {
   return provider ?? "";
 }
 
-export default function SweepPanel({ onAdd, addedUrls }: SweepPanelProps) {
+export default function SweepPanel({ onAdd, addedUrls, onAddedToLibrary }: SweepPanelProps) {
   const { toast } = useToast();
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<SweepResult[]>([]);
@@ -124,6 +125,7 @@ export default function SweepPanel({ onAdd, addedUrls }: SweepPanelProps) {
         await onAdd(result);
       });
       toast(`Added ${pending.length} document${pending.length !== 1 ? "s" : ""} to library`, "success");
+      onAddedToLibrary?.(pending.length);
     } finally {
       setAdding(false);
       setAddProgress(null);

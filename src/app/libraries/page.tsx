@@ -22,8 +22,9 @@ export default function LibrariesPage() {
 
   if (!library.hydrated) {
     return (
-      <main className="flex min-h-screen items-center justify-center bg-slate-50">
-        <Spinner className="h-6 w-6 text-mech-600" />
+      <main className="flex min-h-screen flex-col items-center justify-center gap-3 bg-slate-50">
+        <Spinner className="h-7 w-7 text-mech-600" aria-hidden="true" />
+        <p className="text-sm text-slate-600">Loading your library…</p>
       </main>
     );
   }
