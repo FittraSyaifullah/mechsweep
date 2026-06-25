@@ -640,6 +640,19 @@ export function useDocumentLibrary(options: UseDocumentLibraryOptions = {}) {
     setExportDocs(ready);
   }
 
+  const markDocumentsExported = useCallback((ids: string[]) => {
+    if (ids.length === 0) return;
+    const exportedAt = new Date().toISOString();
+    const idSet = new Set(ids);
+    setDocuments((prev) => {
+      const next = prev.map((doc) =>
+        idSet.has(doc.id) ? { ...doc, exportedAt } : doc
+      );
+      void flushDocuments(next);
+      return next;
+    });
+  }, []);
+
   function bulkRetry(docs: MechDocument[]) {
     for (const doc of docs) void retryDoc(doc);
     toast(`Retrying ${docs.length} doc${docs.length !== 1 ? "s" : ""}`, "info");
@@ -671,6 +684,7 @@ export function useDocumentLibrary(options: UseDocumentLibraryOptions = {}) {
     clearAll,
     selectDoc,
     openExport,
+    markDocumentsExported,
     bulkRetry,
     setDocuments,
   };

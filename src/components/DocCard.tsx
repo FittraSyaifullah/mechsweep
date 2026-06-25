@@ -3,7 +3,7 @@
 import type { MechDocument } from "@/types";
 import { formatBytes } from "@/lib/parser";
 import HighlightText from "@/components/HighlightText";
-import { Spinner } from "@/components/ui/Icons";
+import { CheckIcon, Spinner } from "@/components/ui/Icons";
 
 interface DocCardProps {
   doc: MechDocument;
@@ -54,6 +54,15 @@ function formatDate(value: string): string {
   return new Intl.DateTimeFormat(undefined, {
     month: "short",
     day: "numeric",
+  }).format(new Date(value));
+}
+
+function formatExportedAt(value: string): string {
+  return new Intl.DateTimeFormat(undefined, {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
   }).format(new Date(value));
 }
 
@@ -116,6 +125,15 @@ export default function DocCard({
             {isProcessing && <Spinner className="h-3 w-3" />}
             {statusLabel(doc)}
           </span>
+          {doc.exportedAt && (
+            <span
+              className="inline-flex items-center gap-1 rounded-md bg-violet-50 px-2 py-1 text-[11px] font-medium text-violet-700 ring-1 ring-violet-100"
+              title={`Exported ${formatExportedAt(doc.exportedAt)}`}
+            >
+              <CheckIcon className="h-3 w-3" />
+              Exported
+            </span>
+          )}
         </div>
 
         <button

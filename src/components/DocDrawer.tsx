@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import type { MechDocument } from "@/types";
 import HighlightText from "@/components/HighlightText";
 import Button from "@/components/ui/Button";
-import { CloseIcon, Spinner } from "@/components/ui/Icons";
+import { CloseIcon, CheckIcon, Spinner } from "@/components/ui/Icons";
 
 interface DocDrawerProps {
   doc: MechDocument | null;
@@ -72,6 +72,18 @@ export default function DocDrawer({
             {doc.category && (
               <p className="mt-1 text-sm text-slate-600">
                 <HighlightText text={doc.category} query={searchQuery} />
+              </p>
+            )}
+            {doc.exportedAt && (
+              <p className="mt-2 inline-flex items-center gap-1 rounded-md bg-violet-50 px-2 py-1 text-xs font-medium text-violet-700 ring-1 ring-violet-100">
+                <CheckIcon className="h-3.5 w-3.5" />
+                Exported{" "}
+                {new Intl.DateTimeFormat(undefined, {
+                  month: "short",
+                  day: "numeric",
+                  hour: "numeric",
+                  minute: "2-digit",
+                }).format(new Date(doc.exportedAt))}
               </p>
             )}
           </div>

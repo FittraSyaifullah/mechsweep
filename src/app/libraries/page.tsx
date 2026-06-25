@@ -81,9 +81,14 @@ export default function LibrariesPage() {
           documents={library.exportDocs}
           title={library.exportDocs.length === 1 ? "Export document" : "Export for RAG"}
           onClose={() => library.setExportDocs(null)}
-          onExported={() => {
-            const count = library.exportDocs?.length ?? 0;
-            toast(`Exported ${count} doc${count !== 1 ? "s" : ""}`, "success");
+          onExported={(detail) => {
+            library.markDocumentsExported(detail.documentIds);
+            const count = detail.documentIds.length;
+            const suffix =
+              detail.mode === "folder" && detail.fileCount
+                ? ` (${detail.fileCount} files)`
+                : "";
+            toast(`Exported ${count} doc${count !== 1 ? "s" : ""}${suffix}`, "success");
           }}
         />
       )}

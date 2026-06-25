@@ -40,6 +40,8 @@ export interface MechDocument {
   addedAt: string;
   status: DocStatus;
   error?: string;
+  /** ISO timestamp when this document was last exported. */
+  exportedAt?: string;
 }
 
 export interface DocumentPage {

@@ -21,7 +21,11 @@ import { CloseIcon } from "@/components/ui/Icons";
 interface ExportModalProps {
   documents: MechDocument[];
   onClose: () => void;
-  onExported?: (detail?: { mode: "download" | "folder"; fileCount?: number }) => void;
+  onExported?: (detail: {
+    mode: "download" | "folder";
+    documentIds: string[];
+    fileCount?: number;
+  }) => void;
   title?: string;
 }
 
@@ -116,7 +120,7 @@ export default function ExportModal({
       `${filenameBase}.${selected.extension}`,
       selected.mimeType
     );
-    onExported?.({ mode: "download" });
+    onExported?.({ mode: "download", documentIds: readyDocs.map((doc) => doc.id) });
     onClose();
   }
 
@@ -125,11 +129,11 @@ export default function ExportModal({
     setExporting(true);
     try {
       const result = await exportDocumentsToFolder(readyDocs, options);
-      toast(
-        `Exported ${result.fileCount} files to folder "${result.folderName}"`,
-        "success"
-      );
-      onExported?.({ mode: "folder", fileCount: result.fileCount });
+      onExported?.({
+        mode: "folder",
+        documentIds: readyDocs.map((doc) => doc.id),
+        fileCount: result.fileCount,
+      });
       onClose();
     } catch (err) {
       if (err instanceof DOMException && err.name === "AbortError") return;

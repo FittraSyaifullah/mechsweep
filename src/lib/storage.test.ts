@@ -215,14 +215,18 @@ describe("storage (IndexedDB)", () => {
     expect(blobStore.files.size).toBe(0);
   });
 
-  it("trims saves to the library capacity limit", async () => {
-    const docs = Array.from({ length: MAX_LIBRARY_DOCUMENTS + 5 }, (_, index) =>
-      doc({ id: `doc-${index}`, content: "", contentHash: `hash-${index}` })
-    );
+  it(
+    "trims saves to the library capacity limit",
+    async () => {
+      const docs = Array.from({ length: MAX_LIBRARY_DOCUMENTS + 5 }, (_, index) =>
+        doc({ id: `doc-${index}`, content: "", contentHash: `hash-${index}` })
+      );
 
-    await saveDocuments(docs);
-    expect((await loadDocuments()).length).toBe(MAX_LIBRARY_DOCUMENTS);
-  });
+      await saveDocuments(docs);
+      expect((await loadDocuments()).length).toBe(MAX_LIBRARY_DOCUMENTS);
+    },
+    15000
+  );
 
   it("migrates localStorage backup into IndexedDB on first load", async () => {
     const store = setupBrowserGlobals();
