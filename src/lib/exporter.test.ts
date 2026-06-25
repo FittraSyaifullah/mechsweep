@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  buildExportArchiveFiles,
   exportToCsv,
   exportToJson,
   exportToPdf,
@@ -72,5 +73,15 @@ describe("exporter", () => {
 
     const zip = new Uint8Array(exportToZip(docs, options));
     expect(Array.from(zip.slice(0, 4))).toEqual([0x50, 0x4b, 0x03, 0x04]);
+  });
+
+  it("builds multi-file archive layout for folder export", () => {
+    const files = buildExportArchiveFiles(docs, options);
+    expect(files.map((file) => file.path)).toEqual([
+      "manifest.json",
+      "plain-chunks.jsonl",
+      "corpus.json",
+      "documents/001-pump-curves.txt",
+    ]);
   });
 });

@@ -437,6 +437,39 @@ function slugifyFilename(value: string): string {
     .slice(0, 80);
 }
 
+export interface ExportArchiveFile {
+  path: string;
+  content: string;
+}
+
+/** Multi-file RAG export layout (same contents as the ZIP export, as paths). */
+export function buildExportArchiveFiles(
+  documents: MechDocument[],
+  options: ExportOptions
+): ExportArchiveFile[] {
+  const payload = buildPayload(documents, options);
+  return [
+    {
+      path: "manifest.json",
+      content: JSON.stringify(payload.manifest, null, 2),
+    },
+    {
+      path: `${options.preset}-chunks.jsonl`,
+      content: payload.chunks.map((chunk) => JSON.stringify(chunk)).join("\n"),
+    },
+    {
+      path: "corpus.json",
+      content: JSON.stringify(payload, null, 2),
+    },
+    ...documents.map((doc, index) => ({
+      path: `documents/${String(index + 1).padStart(3, "0")}-${
+        slugifyFilename(doc.title) || "document"
+      }.txt`,
+      content: exportToTxt([doc], options),
+    })),
+  ];
+}
+
 function concatBytes(parts: Uint8Array[]): Uint8Array {
   const length = parts.reduce((sum, part) => sum + part.length, 0);
   const output = new Uint8Array(length);
@@ -483,30 +516,14 @@ export function exportToZip(
   options: ExportOptions
 ): ArrayBuffer {
   const encoder = new TextEncoder();
-  const payload = buildPayload(documents, options);
-  const files = [
-    {
-      name: "manifest.json",
-      content: JSON.stringify(payload.manifest, null, 2),
-    },
-    {
-      name: `${options.preset}-chunks.jsonl`,
-      content: payload.chunks.map((chunk) => JSON.stringify(chunk)).join("\n"),
-    },
-    ...documents.map((doc, index) => ({
-      name: `documents/${String(index + 1).padStart(3, "0")}-${
-        slugifyFilename(doc.title) || "document"
-      }.txt`,
-      content: exportToTxt([doc], options),
-    })),
-  ];
+  const files = buildExportArchiveFiles(documents, options);
 
   const localParts: Uint8Array[] = [];
   const centralParts: Uint8Array[] = [];
   let offset = 0;
 
   for (const file of files) {
-    const nameBytes = encoder.encode(file.name);
+    const nameBytes = encoder.encode(file.path);
     const data = encoder.encode(file.content);
     const checksum = crc32(data);
     const common = [

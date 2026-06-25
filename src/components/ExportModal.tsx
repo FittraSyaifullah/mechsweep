@@ -2,6 +2,11 @@
 
 import { useEffect, useState } from "react";
 import type { ExportOptions, MechDocument } from "@/types";
+import { useToast } from "@/components/Toast";
+import {
+  exportDocumentsToFolder,
+  isFolderExportSupported,
+} from "@/lib/export-folder";
 import {
   downloadExport,
   exportToCsv,
@@ -16,7 +21,7 @@ import { CloseIcon } from "@/components/ui/Icons";
 interface ExportModalProps {
   documents: MechDocument[];
   onClose: () => void;
-  onExported?: () => void;
+  onExported?: (detail?: { mode: "download" | "folder"; fileCount?: number }) => void;
   title?: string;
 }
 
@@ -34,6 +39,7 @@ export default function ExportModal({
   onExported,
   title = "Export for RAG",
 }: ExportModalProps) {
+  const { toast } = useToast();
   const [options, setOptions] = useState<ExportOptions>({
     format: "json",
     preset: "plain",
@@ -44,12 +50,14 @@ export default function ExportModal({
     includeSummaries: true,
     includeTags: true,
   });
+  const [exporting, setExporting] = useState(false);
+  const folderExportSupported = isFolderExportSupported();
 
   const readyDocs = documents.filter((d) => d.status === "ready");
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
-      if (e.key === "Escape") onClose();
+      if (e.key === "Escape" && !exporting) onClose();
     }
     document.addEventListener("keydown", onKey);
     document.body.style.overflow = "hidden";
@@ -57,9 +65,9 @@ export default function ExportModal({
       document.removeEventListener("keydown", onKey);
       document.body.style.overflow = "";
     };
-  }, [onClose]);
+  }, [onClose, exporting]);
 
-  function handleExport() {
+  function buildDownloadPayload() {
     const timestamp = new Date().toISOString().slice(0, 10);
     const filenameBase =
       readyDocs.length === 1
@@ -96,26 +104,58 @@ export default function ExportModal({
         mimeType: "application/zip",
       },
     };
-    const selected = exporters[options.format];
+
+    return { filenameBase, selected: exporters[options.format] };
+  }
+
+  async function handleDownload() {
+    if (readyDocs.length === 0) return;
+    const { filenameBase, selected } = buildDownloadPayload();
     downloadExport(
       selected.content,
       `${filenameBase}.${selected.extension}`,
       selected.mimeType
     );
-    onExported?.();
+    onExported?.({ mode: "download" });
     onClose();
+  }
+
+  async function handleFolderExport() {
+    if (readyDocs.length === 0 || exporting) return;
+    setExporting(true);
+    try {
+      const result = await exportDocumentsToFolder(readyDocs, options);
+      toast(
+        `Exported ${result.fileCount} files to folder "${result.folderName}"`,
+        "success"
+      );
+      onExported?.({ mode: "folder", fileCount: result.fileCount });
+      onClose();
+    } catch (err) {
+      if (err instanceof DOMException && err.name === "AbortError") return;
+      const message =
+        err instanceof Error ? err.message : "Could not export to folder";
+      toast(message, "error");
+    } finally {
+      setExporting(false);
+    }
   }
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-      <div className="absolute inset-0 bg-black/40" onClick={onClose} aria-hidden />
+      <div
+        className="absolute inset-0 bg-black/40"
+        onClick={exporting ? undefined : onClose}
+        aria-hidden
+      />
       <div className="relative w-full max-w-sm rounded-xl border border-slate-200 bg-white p-5 shadow-xl">
         <div className="flex items-center justify-between">
           <h2 className="text-lg font-semibold text-slate-900">{title}</h2>
           <button
             type="button"
             onClick={onClose}
-            className="rounded p-1 text-slate-400 hover:text-slate-600"
+            disabled={exporting}
+            className="rounded p-1 text-slate-400 hover:text-slate-600 disabled:opacity-50"
             aria-label="Close"
           >
             <CloseIcon className="h-5 w-5" />
@@ -132,8 +172,9 @@ export default function ExportModal({
               <button
                 key={fmt}
                 type="button"
+                disabled={exporting}
                 onClick={() => setOptions((o) => ({ ...o, format: fmt }))}
-                className={`flex-1 rounded-lg border py-2 text-sm font-medium uppercase transition ${
+                className={`flex-1 rounded-lg border py-2 text-sm font-medium uppercase transition disabled:opacity-50 ${
                   options.format === fmt
                     ? "border-mech-500 bg-mech-50 text-mech-700"
                     : "border-slate-200 text-slate-500 hover:border-slate-300"
@@ -150,6 +191,7 @@ export default function ExportModal({
             </label>
             <select
               value={options.preset}
+              disabled={exporting}
               onChange={(e) =>
                 setOptions((o) => ({
                   ...o,
@@ -173,6 +215,7 @@ export default function ExportModal({
                 min={200}
                 max={8000}
                 step={100}
+                disabled={exporting}
                 value={options.chunkSize}
                 onChange={(e) =>
                   setOptions((o) => ({
@@ -190,6 +233,7 @@ export default function ExportModal({
                 min={0}
                 max={2000}
                 step={50}
+                disabled={exporting}
                 value={options.chunkOverlap}
                 onChange={(e) =>
                   setOptions((o) => ({
@@ -217,6 +261,7 @@ export default function ExportModal({
               <input
                 type="checkbox"
                 checked={options[key]}
+                disabled={exporting}
                 onChange={(e) =>
                   setOptions((o) => ({ ...o, [key]: e.target.checked }))
                 }
@@ -225,13 +270,41 @@ export default function ExportModal({
               {label}
             </label>
           ))}
+
+          {folderExportSupported ? (
+            <p className="rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-600">
+              Export to folder writes{" "}
+              <span className="font-medium">manifest.json</span>,{" "}
+              <span className="font-medium">corpus.json</span>, chunk files, and one
+              text file per document under <span className="font-medium">documents/</span>.
+            </p>
+          ) : (
+            <p className="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800">
+              Folder export needs Chrome or Edge. Use ZIP download for the same layout
+              in one file.
+            </p>
+          )}
         </div>
 
-        <div className="mt-5 flex justify-end gap-2">
-          <Button variant="secondary" size="sm" onClick={onClose}>
+        <div className="mt-5 flex flex-wrap justify-end gap-2">
+          <Button variant="secondary" size="sm" onClick={onClose} disabled={exporting}>
             Cancel
           </Button>
-          <Button size="sm" onClick={handleExport} disabled={readyDocs.length === 0}>
+          {folderExportSupported && (
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => void handleFolderExport()}
+              disabled={readyDocs.length === 0 || exporting}
+            >
+              {exporting ? "Exporting…" : "Export to folder"}
+            </Button>
+          )}
+          <Button
+            size="sm"
+            onClick={() => void handleDownload()}
+            disabled={readyDocs.length === 0 || exporting}
+          >
             Download
           </Button>
         </div>
