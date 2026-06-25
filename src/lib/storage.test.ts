@@ -2,7 +2,7 @@ import "fake-indexeddb/auto";
 import { IDBFactory } from "fake-indexeddb";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { DocumentBlobPayload } from "@/lib/document-blobs";
-import { setDocumentBlobStoreForTests } from "@/lib/document-blobs";
+import { resetOpfsProbeForTests, setDocumentBlobStoreForTests } from "@/lib/document-blobs";
 import { MAX_LIBRARY_DOCUMENTS } from "@/lib/constants";
 import {
   clearDocuments,
@@ -51,7 +51,7 @@ function doc(overrides: Partial<MechDocument>): MechDocument {
 
 function setupBrowserGlobals() {
   const store = new Map<string, string>();
-  vi.stubGlobal("window", globalThis);
+  vi.stubGlobal("window", { ...globalThis, isSecureContext: true });
   vi.stubGlobal("localStorage", {
     getItem: (key: string) => store.get(key) ?? null,
     setItem: (key: string, value: string) => store.set(key, value),
@@ -65,6 +65,7 @@ describe("storage (localStorage fallback)", () => {
     setupBrowserGlobals();
     vi.stubGlobal("indexedDB", undefined);
     setDocumentBlobStoreForTests(null);
+    resetOpfsProbeForTests();
   });
 
   it("loads an empty array when storage is invalid", async () => {
@@ -105,6 +106,7 @@ describe("storage (IndexedDB)", () => {
     setupBrowserGlobals();
     vi.stubGlobal("indexedDB", new IDBFactory());
     setDocumentBlobStoreForTests(blobStore);
+    resetOpfsProbeForTests();
   });
 
   it("persists documents in IndexedDB", async () => {
@@ -151,6 +153,38 @@ describe("storage (IndexedDB)", () => {
     const loaded = await loadDocuments();
     expect(loaded[0]?.content).toBe(heavy);
     expect(loaded[0]?.pages?.[0]?.text).toBe("Page one");
+  });
+
+  it("keeps content inline in IndexedDB when OPFS writes fail", async () => {
+    const failingStore = {
+      ...createMemoryBlobStore(),
+      write: async () => {
+        throw new Error("OPFS unavailable");
+      },
+    };
+    setDocumentBlobStoreForTests(failingStore);
+
+    const content = "inline fallback content";
+    await saveDocuments([doc({ id: "inline-1", content })]);
+
+    const db = await new Promise<IDBDatabase>((resolve, reject) => {
+      const request = indexedDB.open("mechsweep", 2);
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+    const record = await new Promise<MechDocument>((resolve, reject) => {
+      const tx = db.transaction("library", "readonly");
+      const request = tx.objectStore("library").get("inline-1");
+      request.onsuccess = () => resolve(request.result as MechDocument);
+      request.onerror = () => reject(request.error);
+    });
+    db.close();
+
+    expect(record.blobStored).toBeUndefined();
+    expect(record.content).toBe(content);
+
+    const loaded = await loadDocuments();
+    expect(loaded[0]?.content).toBe(content);
   });
 
   it("upserts a single document without rewriting the full library", async () => {

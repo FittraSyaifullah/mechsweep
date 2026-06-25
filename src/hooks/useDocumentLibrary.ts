@@ -27,10 +27,10 @@ import {
   clearDocuments,
   deleteDocuments,
   flushDocuments,
+  initBrowserStorage,
   isLibraryAtCapacity,
   loadDocuments,
   remainingLibraryCapacity,
-  requestPersistentLibraryStorage,
   saveDocuments,
   upsertDocument,
 } from "@/lib/storage";
@@ -61,17 +61,23 @@ export function useDocumentLibrary(options: UseDocumentLibraryOptions = {}) {
 
   useEffect(() => {
     let active = true;
-    void requestPersistentLibraryStorage();
-    void loadDocuments().then((docs) => {
-      if (!active) return;
-      const loaded = options.filterEmptySweepErrors
-        ? docs.filter(
-            (doc) => !(doc.source === "sweep" && doc.status === "error" && !doc.content)
-          )
-        : docs;
-      setDocuments(loaded);
-      setHydrated(true);
-    });
+    void initBrowserStorage();
+    void loadDocuments()
+      .then((docs) => {
+        if (!active) return;
+        const loaded = options.filterEmptySweepErrors
+          ? docs.filter(
+              (doc) => !(doc.source === "sweep" && doc.status === "error" && !doc.content)
+            )
+          : docs;
+        setDocuments(loaded);
+        setHydrated(true);
+      })
+      .catch(() => {
+        if (!active) return;
+        setDocuments([]);
+        setHydrated(true);
+      });
     return () => {
       active = false;
     };

@@ -20,22 +20,83 @@ interface DocumentBlobStore {
 }
 
 let testStore: DocumentBlobStore | null = null;
+let opfsProbeResult: boolean | null = null;
+let opfsProbePromise: Promise<boolean> | null = null;
 
-export function isOpfsSupported(): boolean {
-  if (testStore) return true;
+function hasOpfsApi(): boolean {
   return (
+    typeof window !== "undefined" &&
+    window.isSecureContext &&
     typeof navigator !== "undefined" &&
     typeof navigator.storage?.getDirectory === "function"
   );
 }
 
+export function isOpfsSupported(): boolean {
+  if (testStore) return true;
+  if (opfsProbeResult !== null) return opfsProbeResult;
+  return hasOpfsApi();
+}
+
+/** Probe OPFS read/write once (Chrome, Edge, etc.). Cached until reset. */
+export async function probeOpfsSupport(force = false): Promise<boolean> {
+  if (testStore) return true;
+  if (!force && opfsProbeResult !== null) return opfsProbeResult;
+  if (!force && opfsProbePromise) return opfsProbePromise;
+
+  opfsProbePromise = (async () => {
+    if (!hasOpfsApi()) {
+      opfsProbeResult = false;
+      return false;
+    }
+
+    try {
+      const root = await navigator.storage.getDirectory();
+      const dir = await root.getDirectoryHandle(BLOB_DIR, { create: true });
+      const probeName = ".__probe";
+      const handle = await dir.getFileHandle(probeName, { create: true });
+      if (typeof handle.createWritable !== "function") {
+        await dir.removeEntry(probeName).catch(() => undefined);
+        opfsProbeResult = false;
+        return false;
+      }
+      const writable = await handle.createWritable();
+      await writable.write("ok");
+      await writable.close();
+      await dir.removeEntry(probeName).catch(() => undefined);
+      opfsProbeResult = true;
+      return true;
+    } catch {
+      opfsProbeResult = false;
+      return false;
+    } finally {
+      opfsProbePromise = null;
+    }
+  })();
+
+  return opfsProbePromise;
+}
+
 /** Test-only hook for in-memory blob storage. */
 export function setDocumentBlobStoreForTests(store: DocumentBlobStore | null): void {
   testStore = store;
+  opfsProbeResult = store ? true : null;
+  opfsProbePromise = null;
+}
+
+/** Test-only reset of OPFS probe cache. */
+export function resetOpfsProbeForTests(): void {
+  if (testStore) return;
+  opfsProbeResult = null;
+  opfsProbePromise = null;
 }
 
 function blobFileName(id: string): string {
   return `${id}.json`;
+}
+
+function markOpfsUnavailable(): void {
+  if (!testStore) opfsProbeResult = false;
 }
 
 function createOpfsStore(): DocumentBlobStore {
@@ -57,19 +118,27 @@ function createOpfsStore(): DocumentBlobStore {
 
   async function writeManifest(dir: FileSystemDirectoryHandle, ids: Set<string>): Promise<void> {
     const handle = await dir.getFileHandle(MANIFEST_FILE, { create: true });
+    if (typeof handle.createWritable !== "function") {
+      throw new Error("OPFS createWritable is unavailable");
+    }
     const writable = await handle.createWritable();
     await writable.write(JSON.stringify({ ids: Array.from(ids) }));
     await writable.close();
   }
 
+  async function writePayload(id: string, payload: DocumentBlobPayload): Promise<void> {
+    const dir = await libraryDir(true);
+    const handle = await dir.getFileHandle(blobFileName(id), { create: true });
+    if (typeof handle.createWritable !== "function") {
+      throw new Error("OPFS createWritable is unavailable");
+    }
+    const writable = await handle.createWritable();
+    await writable.write(JSON.stringify(payload));
+    await writable.close();
+  }
+
   return {
-    async write(id, payload) {
-      const dir = await libraryDir(true);
-      const handle = await dir.getFileHandle(blobFileName(id), { create: true });
-      const writable = await handle.createWritable();
-      await writable.write(JSON.stringify(payload));
-      await writable.close();
-    },
+    write: writePayload,
     async read(id) {
       try {
         const dir = await libraryDir(false);
@@ -176,8 +245,13 @@ export async function writeDocumentBlob(
 ): Promise<boolean> {
   const store = activeStore();
   if (!store) return false;
-  await store.write(id, payload);
-  return true;
+  try {
+    await store.write(id, payload);
+    return true;
+  } catch {
+    markOpfsUnavailable();
+    return false;
+  }
 }
 
 export async function readDocumentBlob(id: string): Promise<DocumentBlobPayload | null> {
@@ -192,41 +266,51 @@ export async function deleteDocumentBlob(id: string): Promise<void> {
   await store.delete(id);
 }
 
-export async function syncDocumentBlobs(
-  docs: MechDocument[],
-  keepIds: Set<string>
-): Promise<void> {
-  const store = activeStore();
-  if (!store) return;
-
-  await store.deleteExcept(keepIds);
-
-  const blobIds = new Set<string>();
-  await Promise.all(
-    docs.map(async (doc) => {
-      if (!documentHasBlobPayload(doc)) {
-        await store.delete(doc.id);
-        return;
-      }
-      blobIds.add(doc.id);
-      await store.write(doc.id, extractDocumentBlob(doc));
-    })
-  );
-
-  if (testStore) {
-    return;
-  }
-
+async function writeManifestIds(ids: Set<string>): Promise<void> {
+  if (testStore || !isOpfsSupported()) return;
   try {
     const root = await navigator.storage.getDirectory();
     const dir = await root.getDirectoryHandle(BLOB_DIR, { create: true });
     const handle = await dir.getFileHandle(MANIFEST_FILE, { create: true });
+    if (typeof handle.createWritable !== "function") return;
     const writable = await handle.createWritable();
-    await writable.write(JSON.stringify({ ids: Array.from(blobIds) }));
+    await writable.write(JSON.stringify({ ids: Array.from(ids) }));
     await writable.close();
   } catch {
-    // Manifest updates are best-effort.
+    markOpfsUnavailable();
   }
+}
+
+/** Returns document ids whose blobs were stored successfully. */
+export async function syncDocumentBlobs(
+  docs: MechDocument[],
+  keepIds: Set<string>
+): Promise<Set<string>> {
+  const store = activeStore();
+  const storedIds = new Set<string>();
+  if (!store) return storedIds;
+
+  try {
+    await store.deleteExcept(keepIds);
+  } catch {
+    markOpfsUnavailable();
+    return storedIds;
+  }
+
+  await Promise.all(
+    docs.map(async (doc) => {
+      if (!documentHasBlobPayload(doc)) return;
+      try {
+        await store.write(doc.id, extractDocumentBlob(doc));
+        storedIds.add(doc.id);
+      } catch {
+        markOpfsUnavailable();
+      }
+    })
+  );
+
+  await writeManifestIds(storedIds);
+  return storedIds;
 }
 
 export async function clearDocumentBlobs(): Promise<void> {

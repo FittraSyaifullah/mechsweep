@@ -2,11 +2,10 @@ import {
   clearDocumentBlobs,
   deleteDocumentBlob,
   documentHasBlobPayload,
-  extractDocumentBlob,
   hydrateDocumentsFromBlobs,
   isOpfsSupported,
+  probeOpfsSupport,
   syncDocumentBlobs,
-  writeDocumentBlob,
 } from "@/lib/document-blobs";
 import { LOCAL_STORAGE_BACKUP_MAX_CHARS, MAX_LIBRARY_DOCUMENTS } from "@/lib/constants";
 import { removeDuplicateDocuments } from "@/lib/duplicates";
@@ -73,11 +72,12 @@ function mergePersistedLibraries(a: MechDocument[], b: MechDocument[]): MechDocu
   return trimToCapacity(Array.from(merged.values()));
 }
 
-function toPersistedRecord(doc: MechDocument): MechDocument {
-  if (!isOpfsSupported() || !documentHasBlobPayload(doc)) {
+function buildPersistedRecord(doc: MechDocument, blobStored: boolean): MechDocument {
+  if (!blobStored || !documentHasBlobPayload(doc)) {
     return {
       ...doc,
       contentLength: contentLengthOf(doc),
+      blobStored: undefined,
     };
   }
 
@@ -206,23 +206,19 @@ async function migrateInlineRecordsToOpfs(
   db: IDBDatabase,
   docs: MechDocument[]
 ): Promise<MechDocument[]> {
-  if (!isOpfsSupported()) return docs;
+  if (!(await probeOpfsSupport())) return docs;
 
-  const migrated: MechDocument[] = [];
-  let changed = false;
+  const toMigrate = docs.filter((doc) => !doc.blobStored && documentHasBlobPayload(doc));
+  if (toMigrate.length === 0) return docs;
 
-  for (const doc of docs) {
-    if (doc.blobStored || !documentHasBlobPayload(doc)) {
-      migrated.push(doc);
-      continue;
+  const keepIds = new Set(docs.map((doc) => doc.id));
+  const storedIds = await syncDocumentBlobs(toMigrate, keepIds);
+  const migrated = docs.map((doc) => {
+    if (!doc.blobStored && documentHasBlobPayload(doc)) {
+      return buildPersistedRecord(doc, storedIds.has(doc.id));
     }
-
-    changed = true;
-    await writeDocumentBlob(doc.id, extractDocumentBlob(doc));
-    migrated.push(toPersistedRecord(doc));
-  }
-
-  if (!changed) return docs;
+    return doc;
+  });
 
   await putRecordsInLibraryStore(db, migrated);
   return migrated;
@@ -245,9 +241,9 @@ async function writeAllToLibraryStore(db: IDBDatabase, docs: MechDocument[]): Pr
   const normalized = trimToCapacity(docs);
   const keepIds = new Set(normalized.map((doc) => doc.id));
 
-  await syncDocumentBlobs(normalized, keepIds);
-
-  const records = normalized.map(toPersistedRecord);
+  await probeOpfsSupport();
+  const storedIds = await syncDocumentBlobs(normalized, keepIds);
+  const records = normalized.map((doc) => buildPersistedRecord(doc, storedIds.has(doc.id)));
 
   return new Promise((resolve, reject) => {
     const tx = db.transaction(LIBRARY_STORE, "readwrite");
@@ -274,14 +270,17 @@ async function writeAllToLibraryStore(db: IDBDatabase, docs: MechDocument[]): Pr
 }
 
 async function persistDocumentRecord(doc: MechDocument): Promise<void> {
-  if (documentHasBlobPayload(doc)) {
-    await syncDocumentBlobs([doc], new Set([doc.id]));
-  } else {
+  await probeOpfsSupport();
+  const storedIds = documentHasBlobPayload(doc)
+    ? await syncDocumentBlobs([doc], new Set([doc.id]))
+    : new Set<string>();
+
+  if (!documentHasBlobPayload(doc)) {
     await deleteDocumentBlob(doc.id);
   }
 
   const db = await openDatabase();
-  await putRecordsInLibraryStore(db, [toPersistedRecord(doc)]);
+  await putRecordsInLibraryStore(db, [buildPersistedRecord(doc, storedIds.has(doc.id))]);
   db.close();
 }
 
@@ -303,8 +302,16 @@ export async function requestPersistentLibraryStorage(): Promise<boolean> {
   }
 }
 
+/** Warm up Chrome-compatible storage (OPFS probe + persistence request). */
+export async function initBrowserStorage(): Promise<void> {
+  if (typeof window === "undefined") return;
+  await Promise.all([probeOpfsSupport(), requestPersistentLibraryStorage()]);
+}
+
 export async function loadDocuments(): Promise<MechDocument[]> {
   if (typeof window === "undefined") return [];
+
+  await initBrowserStorage();
 
   const backupDocs = loadFromLocalStorage();
 
@@ -439,4 +446,4 @@ export async function clearDocuments(): Promise<void> {
   }
 }
 
-export { applyDocumentBlob, isOpfsSupported } from "@/lib/document-blobs";
+export { applyDocumentBlob, isOpfsSupported, probeOpfsSupport } from "@/lib/document-blobs";
