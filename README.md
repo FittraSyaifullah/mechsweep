@@ -83,7 +83,23 @@ npm run build
 
 MechSweep can be deployed on Vercel as a standard Next.js app. Add the same OpenRouter environment variables in Vercel project settings before deploying.
 
-Documents are stored in the user's browser through IndexedDB, so each user's library is local to their browser/device unless a backend database is added later.
+Documents are stored in the user's browser through IndexedDB and OPFS by default. Optional **Supabase cloud sync** lets you upload and download your library across devices.
+
+### Supabase cloud sync (optional)
+
+1. Create a free project at [supabase.com](https://supabase.com).
+2. Run `supabase/migrations/001_library.sql` in the Supabase SQL Editor.
+3. Copy your project URL and anon key into `.env.local`:
+
+```bash
+NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
+NEXT_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
+```
+
+4. In Supabase Auth settings, enable email/password sign-up (or disable email confirmation for personal use).
+5. Restart the dev server. Use **Sign in** in the header, then **Upload to cloud** / **Download & merge**.
+
+Cloud storage uses a Postgres index table plus a private `library-blobs` bucket (50 MB per file on the free tier migration).
 
 ## License
 

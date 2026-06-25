@@ -429,12 +429,69 @@ export function exportToPdf(
   return pdf;
 }
 
-function slugifyFilename(value: string): string {
+export function slugifyExportFilename(value: string): string {
   return value
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-|-$/g, "")
     .slice(0, 80);
+}
+
+/** Document path inside a folder export; padding scales with library size. */
+export function buildDocumentExportPath(index: number, total: number, title: string): string {
+  const width = Math.max(3, String(total).length);
+  return `documents/${String(index + 1).padStart(width, "0")}-${
+    slugifyExportFilename(title) || "document"
+  }.txt`;
+}
+
+export function buildExportChunksForDocument(
+  doc: MechDocument,
+  options: ExportOptions
+): PresetChunk[] {
+  return applyPreset(buildBaseChunks([doc], options), options.preset);
+}
+
+export function buildExportManifest(
+  documents: MechDocument[],
+  options: ExportOptions,
+  chunkCount: number
+): ExportManifest {
+  return buildManifest(documents, options, chunkCount);
+}
+
+export interface FolderCorpusIndex {
+  version: string;
+  format: "mechsweep-folder-v2";
+  exportedAt: string;
+  preset: ExportOptions["preset"];
+  manifest: ExportManifest;
+  count: number;
+  chunksFile: string;
+  documents: Array<ExportDocument & { exportPath: string }>;
+}
+
+/** Lightweight corpus index for folder exports (content lives in documents/*.txt). */
+export function buildFolderCorpusIndex(
+  documents: MechDocument[],
+  options: ExportOptions,
+  exportPaths: string[],
+  chunkCount: number
+): FolderCorpusIndex {
+  const metadataOnly: ExportOptions = { ...options, includeContent: false };
+  return {
+    version: "1.0",
+    format: "mechsweep-folder-v2",
+    exportedAt: new Date().toISOString(),
+    preset: options.preset,
+    manifest: buildManifest(documents, options, chunkCount),
+    count: documents.length,
+    chunksFile: `${options.preset}-chunks.jsonl`,
+    documents: documents.map((doc, index) => ({
+      ...buildDocument(doc, metadataOnly),
+      exportPath: exportPaths[index],
+    })),
+  };
 }
 
 export interface ExportArchiveFile {
@@ -462,9 +519,7 @@ export function buildExportArchiveFiles(
       content: JSON.stringify(payload, null, 2),
     },
     ...documents.map((doc, index) => ({
-      path: `documents/${String(index + 1).padStart(3, "0")}-${
-        slugifyFilename(doc.title) || "document"
-      }.txt`,
+      path: buildDocumentExportPath(index, documents.length, doc.title),
       content: exportToTxt([doc], options),
     })),
   ];

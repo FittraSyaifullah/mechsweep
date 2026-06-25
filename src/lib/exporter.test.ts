@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   buildExportArchiveFiles,
+  buildDocumentExportPath,
+  buildFolderCorpusIndex,
   exportToCsv,
   exportToJson,
   exportToPdf,
@@ -83,5 +85,19 @@ describe("exporter", () => {
       "corpus.json",
       "documents/001-pump-curves.txt",
     ]);
+  });
+
+  it("pads document paths for large libraries", () => {
+    expect(buildDocumentExportPath(0, 1, "A")).toBe("documents/001-a.txt");
+    expect(buildDocumentExportPath(999, 1000, "B")).toBe("documents/1000-b.txt");
+    expect(buildDocumentExportPath(0, 25000, "C")).toBe("documents/00001-c.txt");
+  });
+
+  it("builds a lightweight folder corpus index", () => {
+    const paths = [buildDocumentExportPath(0, docs.length, docs[0].title)];
+    const index = buildFolderCorpusIndex(docs, options, paths, 2);
+    expect(index.format).toBe("mechsweep-folder-v2");
+    expect(index.documents[0].exportPath).toBe(paths[0]);
+    expect(index.documents[0].content).toBe("");
   });
 });

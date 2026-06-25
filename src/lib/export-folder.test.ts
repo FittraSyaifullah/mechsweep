@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ExportOptions, MechDocument } from "@/types";
 import { exportDocumentsToFolder, isFolderExportSupported } from "@/lib/export-folder";
-import { buildExportArchiveFiles } from "@/lib/exporter";
+import { buildDocumentExportPath, buildExportArchiveFiles } from "@/lib/exporter";
 
 const options: ExportOptions = {
   format: "json",
@@ -94,11 +94,24 @@ describe("export-folder", () => {
     });
 
     const result = await exportDocumentsToFolder(docs, options);
-    expect(result.fileCount).toBe(buildExportArchiveFiles(docs, options).length);
+    expect(result.fileCount).toBe(docs.length + 3);
+    expect(result.documentCount).toBe(2);
     expect(result.folderName).toMatch(/^mechsweep-\d{4}-\d{2}-\d{2}-2-docs$/);
     expect(mock.files.size).toBe(result.fileCount);
     expect(
       Array.from(mock.files.keys()).some((path) => path.endsWith("documents/001-pump-curves.txt"))
     ).toBe(true);
+
+    const corpusRaw = mock.files.get(`${result.folderName}/corpus.json`);
+    expect(corpusRaw).toBeTruthy();
+    const corpus = JSON.parse(corpusRaw!) as { format: string; documents: { content: string }[] };
+    expect(corpus.format).toBe("mechsweep-folder-v2");
+    expect(corpus.documents.every((item) => item.content === "")).toBe(true);
+  });
+
+  it("uses wider document numbering for large libraries", () => {
+    expect(buildDocumentExportPath(2937, 2938, "Large set")).toBe(
+      "documents/2938-large-set.txt"
+    );
   });
 });

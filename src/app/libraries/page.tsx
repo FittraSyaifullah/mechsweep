@@ -38,6 +38,8 @@ export default function LibrariesPage() {
         processingCount={library.processingCount}
         totalCount={library.documents.length}
         maxDocuments={MAX_LIBRARY_DOCUMENTS}
+        documents={library.documents}
+        onLibraryMerged={library.replaceLibrary}
         onExport={() => library.openExport(library.documents)}
         onClearAll={() => library.setShowClearConfirm(true)}
       />

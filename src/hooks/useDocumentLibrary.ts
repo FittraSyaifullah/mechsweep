@@ -658,6 +658,12 @@ export function useDocumentLibrary(options: UseDocumentLibraryOptions = {}) {
     toast(`Retrying ${docs.length} doc${docs.length !== 1 ? "s" : ""}`, "info");
   }
 
+  const replaceLibrary = useCallback((docs: MechDocument[]) => {
+    setDocuments(docs);
+    void flushDocuments(docs);
+    toast(`Library updated (${docs.length.toLocaleString()} documents)`, "success");
+  }, [toast]);
+
   return {
     documents,
     hydrated,
@@ -686,6 +692,7 @@ export function useDocumentLibrary(options: UseDocumentLibraryOptions = {}) {
     openExport,
     markDocumentsExported,
     bulkRetry,
+    replaceLibrary,
     setDocuments,
   };
 }

@@ -2,8 +2,10 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import CloudSyncPanel from "@/components/CloudSyncPanel";
 import Button from "@/components/ui/Button";
 import { ExportIcon, LogoMark } from "@/components/ui/Icons";
+import type { MechDocument } from "@/types";
 
 interface AppHeaderProps {
   readyCount: number;
@@ -13,6 +15,8 @@ interface AppHeaderProps {
   onExport: () => void;
   onClearAll: () => void;
   maxWidth?: "3xl" | "6xl";
+  documents?: MechDocument[];
+  onLibraryMerged?: (docs: MechDocument[]) => void;
 }
 
 export default function AppHeader({
@@ -23,6 +27,8 @@ export default function AppHeader({
   onExport,
   onClearAll,
   maxWidth = "3xl",
+  documents = [],
+  onLibraryMerged,
 }: AppHeaderProps) {
   const pathname = usePathname();
   const onLibrariesPage = pathname === "/libraries";
@@ -89,6 +95,9 @@ export default function AppHeader({
           >
             Library
           </Link>
+          {onLibraryMerged && (
+            <CloudSyncPanel documents={documents} onLibraryMerged={onLibraryMerged} />
+          )}
           {totalCount > 0 && (
             <Button
               variant="ghost"

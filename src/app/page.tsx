@@ -80,6 +80,8 @@ export default function Home() {
         totalCount={library.documents.length}
         maxDocuments={MAX_LIBRARY_DOCUMENTS}
         maxWidth={hasLibrary ? "6xl" : "3xl"}
+        documents={library.documents}
+        onLibraryMerged={library.replaceLibrary}
         onExport={() => library.openExport(library.documents)}
         onClearAll={() => library.setShowClearConfirm(true)}
       />

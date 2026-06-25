@@ -6,6 +6,7 @@ import { useToast } from "@/components/Toast";
 import {
   exportDocumentsToFolder,
   isFolderExportSupported,
+  type FolderExportProgress,
 } from "@/lib/export-folder";
 import {
   downloadExport,
@@ -55,6 +56,7 @@ export default function ExportModal({
     includeTags: true,
   });
   const [exporting, setExporting] = useState(false);
+  const [folderProgress, setFolderProgress] = useState<FolderExportProgress | null>(null);
   const folderExportSupported = isFolderExportSupported();
 
   const readyDocs = documents.filter((d) => d.status === "ready");
@@ -127,8 +129,9 @@ export default function ExportModal({
   async function handleFolderExport() {
     if (readyDocs.length === 0 || exporting) return;
     setExporting(true);
+    setFolderProgress(null);
     try {
-      const result = await exportDocumentsToFolder(readyDocs, options);
+      const result = await exportDocumentsToFolder(readyDocs, options, setFolderProgress);
       onExported?.({
         mode: "folder",
         documentIds: readyDocs.map((doc) => doc.id),
@@ -142,7 +145,16 @@ export default function ExportModal({
       toast(message, "error");
     } finally {
       setExporting(false);
+      setFolderProgress(null);
     }
+  }
+
+  function folderProgressLabel(progress: FolderExportProgress): string {
+    if (progress.phase === "preparing") return "Preparing folder export…";
+    if (progress.phase === "metadata") return "Writing manifest and index…";
+    const pct =
+      progress.total > 0 ? Math.round((progress.completed / progress.total) * 100) : 0;
+    return `Writing documents… ${progress.completed.toLocaleString()} / ${progress.total.toLocaleString()} (${pct}%)`;
   }
 
   return (
@@ -281,6 +293,7 @@ export default function ExportModal({
               <span className="font-medium">manifest.json</span>,{" "}
               <span className="font-medium">corpus.json</span>, chunk files, and one
               text file per document under <span className="font-medium">documents/</span>.
+              Streams one document at a time — works for libraries of any size in Chrome or Edge.
             </p>
           ) : (
             <p className="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800">
@@ -289,6 +302,13 @@ export default function ExportModal({
             </p>
           )}
         </div>
+
+        {folderProgress && (
+          <p className="mt-3 flex items-center gap-2 rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-xs text-sky-800">
+            <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-sky-600 border-t-transparent" aria-hidden="true" />
+            {folderProgressLabel(folderProgress)}
+          </p>
+        )}
 
         <div className="mt-5 flex flex-wrap justify-end gap-2">
           <Button variant="secondary" size="sm" onClick={onClose} disabled={exporting}>
