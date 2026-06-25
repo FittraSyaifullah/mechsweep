@@ -25,29 +25,29 @@ function statusLabel(doc: MechDocument): string {
 }
 
 const STATUS_COLOR: Record<MechDocument["status"], string> = {
-  pending: "text-amber-600",
-  processing: "text-sky-600",
-  ready: "text-emerald-600",
-  error: "text-red-600",
+  pending: "text-amber-800",
+  processing: "text-sky-800",
+  ready: "text-emerald-800",
+  error: "text-red-800",
 };
 
 const STATUS_BG: Record<MechDocument["status"], string> = {
-  pending: "bg-amber-50 ring-amber-100",
-  processing: "bg-sky-50 ring-sky-100",
-  ready: "bg-emerald-50 ring-emerald-100",
-  error: "bg-red-50 ring-red-100",
+  pending: "bg-amber-100 ring-amber-300",
+  processing: "bg-sky-100 ring-sky-300",
+  ready: "bg-emerald-100 ring-emerald-300",
+  error: "bg-red-100 ring-red-300",
 };
 
 const TYPE_BG: Record<MechDocument["type"], string> = {
-  pdf: "bg-red-50 text-red-700",
-  txt: "bg-slate-100 text-slate-700",
-  csv: "bg-emerald-50 text-emerald-700",
-  json: "bg-amber-50 text-amber-700",
-  md: "bg-indigo-50 text-indigo-700",
-  zip: "bg-violet-50 text-violet-700",
-  stl: "bg-cyan-50 text-cyan-700",
-  step: "bg-sky-50 text-sky-700",
-  dwg: "bg-orange-50 text-orange-700",
+  pdf: "bg-red-100 text-red-900",
+  txt: "bg-slate-200 text-slate-900",
+  csv: "bg-emerald-100 text-emerald-900",
+  json: "bg-amber-100 text-amber-900",
+  md: "bg-indigo-100 text-indigo-900",
+  zip: "bg-violet-100 text-violet-900",
+  stl: "bg-cyan-100 text-cyan-900",
+  step: "bg-sky-100 text-sky-900",
+  dwg: "bg-orange-100 text-orange-900",
 };
 
 function formatDate(value: string): string {
@@ -66,6 +66,10 @@ function formatExportedAt(value: string): string {
   }).format(new Date(value));
 }
 
+function contentLength(doc: MechDocument): number {
+  return doc.content.length || doc.contentLength || 0;
+}
+
 export default function DocCard({
   doc,
   onRemove,
@@ -79,11 +83,8 @@ export default function DocCard({
 }: DocCardProps) {
   const isProcessing = doc.status === "processing";
   const canExport = doc.status === "ready" && Boolean(onExport);
-  const previewText =
-    doc.content.trim() ||
-    doc.summary ||
-    doc.error ||
-    (isProcessing ? "Document is still being prepared." : "No readable preview available.");
+  const titleId = `doc-title-${doc.id}`;
+
   const handleOpen = () => {
     if (selectionMode) onToggleSelected?.();
     else onSelect();
@@ -91,16 +92,13 @@ export default function DocCard({
 
   return (
     <article
-      role="button"
-      tabIndex={0}
-      onClick={handleOpen}
-      onKeyDown={(e) => e.key === "Enter" && handleOpen()}
-      className={`group relative flex min-h-[15rem] cursor-pointer flex-col rounded-xl border bg-white p-4 shadow-sm transition hover:-translate-y-0.5 hover:border-mech-300 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-mech-500/30 ${
-        selected ? "border-mech-400 ring-2 ring-mech-500/20" : "border-slate-200"
+      className={`flex min-h-[16rem] flex-col rounded-xl border bg-white p-4 shadow-sm motion-safe:transition motion-safe:hover:border-mech-400 motion-safe:hover:shadow-md ${
+        selected ? "border-mech-500 ring-2 ring-mech-500/30" : "border-slate-300"
       }`}
+      aria-labelledby={titleId}
     >
       <div className="flex items-start justify-between gap-3">
-        <div className="flex min-w-0 items-center gap-2">
+        <div className="flex min-w-0 flex-wrap items-center gap-1.5">
           {selectionMode && (
             <input
               type="checkbox"
@@ -109,173 +107,153 @@ export default function DocCard({
                 e.stopPropagation();
                 onToggleSelected?.();
               }}
-              onClick={(e) => e.stopPropagation()}
-              className="rounded border-slate-300 text-mech-600 focus:ring-mech-500"
+              className="h-4 w-4 rounded border-slate-400 text-mech-600 focus:ring-mech-500"
               aria-label={`Select ${doc.title}`}
             />
           )}
           <span
-            className={`rounded-md px-2 py-1 text-[11px] font-semibold uppercase ${TYPE_BG[doc.type]}`}
+            className={`rounded-md px-2 py-1 text-[11px] font-bold uppercase tracking-wide ${TYPE_BG[doc.type]}`}
           >
             {doc.type}
           </span>
           <span
-            className={`inline-flex items-center gap-1 rounded-md px-2 py-1 text-[11px] font-medium ring-1 ${STATUS_BG[doc.status]} ${STATUS_COLOR[doc.status]}`}
+            className={`inline-flex items-center gap-1 rounded-md px-2 py-1 text-[11px] font-semibold ring-1 ${STATUS_BG[doc.status]} ${STATUS_COLOR[doc.status]}`}
+            aria-label={`Status: ${statusLabel(doc)}`}
           >
-            {isProcessing && <Spinner className="h-3 w-3" />}
+            {isProcessing && <Spinner className="h-3 w-3" aria-hidden="true" />}
             {statusLabel(doc)}
           </span>
           {doc.exportedAt && (
             <span
-              className="inline-flex items-center gap-1 rounded-md bg-violet-50 px-2 py-1 text-[11px] font-medium text-violet-700 ring-1 ring-violet-100"
-              title={`Exported ${formatExportedAt(doc.exportedAt)}`}
+              className="inline-flex items-center gap-1 rounded-md bg-violet-100 px-2 py-1 text-[11px] font-semibold text-violet-900 ring-1 ring-violet-300"
+              aria-label={`Exported ${formatExportedAt(doc.exportedAt)}`}
             >
-              <CheckIcon className="h-3 w-3" />
+              <CheckIcon className="h-3 w-3" aria-hidden="true" />
               Exported
             </span>
           )}
         </div>
 
         <button
-          onClick={(e) => {
-            e.stopPropagation();
-            onRemove(doc.id);
-          }}
-          className="rounded-md px-1.5 py-0.5 text-lg leading-none text-slate-400 opacity-100 transition hover:bg-red-50 hover:text-red-600 focus:opacity-100 sm:opacity-0 sm:group-hover:opacity-100"
-          aria-label="Remove"
+          type="button"
+          onClick={() => onRemove(doc.id)}
+          className="touch-target shrink-0 rounded-lg text-slate-500 hover:bg-red-50 hover:text-red-700"
+          aria-label={`Remove ${doc.title}`}
         >
-          ×
+          <span aria-hidden="true" className="text-xl leading-none">
+            ×
+          </span>
         </button>
       </div>
 
-      <div className="mt-4 min-w-0 flex-1">
-        <h3 className="line-clamp-2 text-base font-semibold leading-snug text-slate-900">
+      <button
+        type="button"
+        onClick={handleOpen}
+        className="mt-4 flex min-h-[44px] flex-1 flex-col rounded-lg text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-mech-500 focus-visible:ring-offset-2"
+        aria-label={selectionMode ? `Select ${doc.title}` : `Open ${doc.title}`}
+      >
+        <h3
+          id={titleId}
+          className="line-clamp-3 text-base font-semibold leading-snug text-slate-900"
+          title={doc.title}
+        >
           <HighlightText text={doc.title} query={searchQuery} />
         </h3>
 
-        <div className="mt-2 flex flex-wrap gap-x-2 gap-y-1 text-xs text-slate-500">
+        <div className="mt-2 flex flex-wrap gap-x-2 gap-y-1 text-xs text-slate-600">
           {doc.category && (
-            <HighlightText
-              text={doc.category}
-              query={searchQuery}
-              className="max-w-full truncate"
-            />
+            <>
+              <HighlightText
+                text={doc.category}
+                query={searchQuery}
+                className="max-w-full truncate font-medium"
+              />
+              <span aria-hidden="true">·</span>
+            </>
           )}
-          {doc.category && <span>·</span>}
           <span className="capitalize">{doc.source}</span>
-          <span>·</span>
-          <span>{formatDate(doc.addedAt)}</span>
+          <span aria-hidden="true">·</span>
+          <time dateTime={doc.addedAt}>{formatDate(doc.addedAt)}</time>
         </div>
 
         {doc.summary && (
-          <p className="mt-3 line-clamp-3 text-sm leading-relaxed text-slate-600">
+          <p className="mt-3 line-clamp-3 text-sm leading-relaxed text-slate-700">
             <HighlightText text={doc.summary} query={searchQuery} />
           </p>
         )}
 
         {doc.error && (
-          <p className="mt-3 line-clamp-3 text-sm leading-relaxed text-red-600">
+          <p className="mt-3 line-clamp-3 text-sm leading-relaxed text-red-700" role="alert">
             {doc.error}
           </p>
         )}
 
         {!doc.summary && !doc.error && (
-          <p className="mt-3 text-sm text-slate-400">
-            {isProcessing ? "Preparing document…" : "Click to preview content."}
+          <p className="mt-3 text-sm text-slate-600">
+            {isProcessing ? "Preparing document…" : "Press Open to preview full content."}
           </p>
         )}
 
         {doc.tags && doc.tags.length > 0 && (
-          <div className="mt-3 flex flex-wrap gap-1">
+          <div className="mt-3 flex flex-wrap gap-1.5">
             {doc.tags.slice(0, 3).map((tag) => (
               <span
                 key={tag}
-                className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] text-slate-600"
+                className="rounded-full bg-slate-200 px-2.5 py-0.5 text-[11px] font-medium text-slate-800"
               >
                 <HighlightText text={tag} query={searchQuery} />
               </span>
             ))}
             {doc.tags.length > 3 && (
-              <span className="text-[11px] text-slate-400">+{doc.tags.length - 3}</span>
+              <span className="text-[11px] font-medium text-slate-600">
+                +{doc.tags.length - 3} more
+              </span>
             )}
           </div>
         )}
-      </div>
+      </button>
 
-      <div className="mt-4 flex items-center justify-between border-t border-slate-100 pt-3 text-xs text-slate-500">
-        <div className="flex min-w-0 gap-2">
-          {doc.pageCount != null && <span>{doc.pageCount} pages</span>}
-          {doc.rowCount != null && <span>{doc.rowCount} rows</span>}
+      <footer className="mt-4 flex items-center justify-between gap-2 border-t border-slate-200 pt-3 text-xs text-slate-600">
+        <div className="flex min-w-0 flex-wrap gap-2">
+          {doc.pageCount != null && <span>{doc.pageCount.toLocaleString()} pages</span>}
+          {doc.rowCount != null && <span>{doc.rowCount.toLocaleString()} rows</span>}
           {doc.sizeBytes != null && <span>{formatBytes(doc.sizeBytes)}</span>}
           {doc.pageCount == null && doc.rowCount == null && doc.sizeBytes == null && (
-            <span>{doc.content.length.toLocaleString()} chars</span>
+            <span>{contentLength(doc).toLocaleString()} chars</span>
           )}
         </div>
 
-        {doc.status === "error" ? (
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              onRetry();
-            }}
-            className="rounded px-2 py-1 text-xs font-medium text-mech-600 hover:bg-mech-50"
-          >
-            Retry
-          </button>
-        ) : (
-          <div className="flex items-center gap-2">
-            {canExport && (
+        <div className="flex shrink-0 items-center gap-1.5">
+          {doc.status === "error" ? (
+            <button
+              type="button"
+              onClick={onRetry}
+              className="action-chip bg-mech-50 text-mech-800 hover:bg-mech-100"
+            >
+              Retry
+            </button>
+          ) : (
+            <>
+              {canExport && (
+                <button
+                  type="button"
+                  onClick={onExport}
+                  className="action-chip border border-slate-300 bg-white text-slate-800 hover:bg-slate-50"
+                >
+                  Export
+                </button>
+              )}
               <button
                 type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onExport?.();
-                }}
-                className="font-medium text-slate-500 opacity-100 transition hover:text-mech-700 focus:opacity-100 sm:opacity-0 sm:group-hover:opacity-100"
+                onClick={handleOpen}
+                className="action-chip bg-mech-600 text-white hover:bg-mech-700"
               >
-                Export
+                Open
               </button>
-            )}
-            <span className="font-medium text-mech-600 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 sm:transition sm:group-hover:opacity-100">
-              Open
-            </span>
-          </div>
-        )}
-      </div>
-
-      <div className="pointer-events-none absolute left-3 right-3 top-12 z-20 hidden rounded-xl border border-slate-200 bg-white p-3 text-left shadow-xl sm:group-hover:block">
-        <div className="mb-2 flex items-center justify-between gap-2">
-          <p className="truncate text-xs font-semibold uppercase tracking-wide text-slate-400">
-            File preview
-          </p>
-          <p className="shrink-0 text-[11px] text-slate-400">
-            {doc.pageCount ? `${doc.pageCount} pages` : `${doc.content.length.toLocaleString()} chars`}
-          </p>
+            </>
+          )}
         </div>
-        <p className="max-h-40 overflow-hidden whitespace-pre-wrap text-xs leading-relaxed text-slate-700">
-          <HighlightText text={previewText.slice(0, 900)} query={searchQuery} />
-          {previewText.length > 900 && " …"}
-        </p>
-        {(doc.detectedUnits?.length || doc.tables?.length || doc.detectedLanguage) && (
-          <div className="mt-2 flex flex-wrap gap-1 text-[11px] text-slate-500">
-            {doc.detectedLanguage && (
-              <span className="rounded-full bg-slate-100 px-2 py-0.5">
-                {doc.detectedLanguage}
-              </span>
-            )}
-            {doc.tables && doc.tables.length > 0 && (
-              <span className="rounded-full bg-slate-100 px-2 py-0.5">
-                {doc.tables.length} table{doc.tables.length !== 1 ? "s" : ""}
-              </span>
-            )}
-            {doc.detectedUnits?.slice(0, 4).map((unit) => (
-              <span key={unit} className="rounded-full bg-slate-100 px-2 py-0.5">
-                {unit}
-              </span>
-            ))}
-          </div>
-        )}
-      </div>
+      </footer>
     </article>
   );
 }

@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useState } from "react";
+import SkipLink from "@/components/SkipLink";
 import AppHeader from "@/components/AppHeader";
 import CategoryInsights from "@/components/CategoryInsights";
 import ConfirmDialog from "@/components/ui/ConfirmDialog";
@@ -29,6 +30,7 @@ export default function LibrariesPage() {
 
   return (
     <main className="min-h-screen bg-slate-50">
+      <SkipLink />
       <AppHeader
         maxWidth="6xl"
         readyCount={library.readyCount}

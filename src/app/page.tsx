@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import SkipLink from "@/components/SkipLink";
 import AppHeader from "@/components/AppHeader";
 import CategoryInsights from "@/components/CategoryInsights";
 import DocDrawer from "@/components/DocDrawer";
@@ -39,6 +40,7 @@ export default function Home() {
 
   return (
     <main className="min-h-screen bg-slate-50">
+      <SkipLink />
       <AppHeader
         readyCount={library.readyCount}
         processingCount={library.processingCount}

@@ -29,11 +29,11 @@ export default function AppHeader({
     if (processingCount > 0) {
       return (
         <span className="inline-flex items-center gap-1.5">
-          <span className="relative flex h-2 w-2">
-            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-sky-400 opacity-60" />
-            <span className="relative inline-flex h-2 w-2 rounded-full bg-sky-500" />
+          <span className="relative flex h-2 w-2" aria-hidden="true">
+            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-sky-500 opacity-60" />
+            <span className="relative inline-flex h-2 w-2 rounded-full bg-sky-600" />
           </span>
-          {processingCount} processing · {readyCount} ready
+          {processingCount.toLocaleString()} processing · {readyCount.toLocaleString()} ready
         </span>
       );
     }
@@ -42,38 +42,52 @@ export default function AppHeader({
         maxDocuments && totalCount > 0
           ? `${totalCount.toLocaleString()} / ${maxDocuments.toLocaleString()}`
           : `${totalCount.toLocaleString()}`;
-      return `${capacity} documents · ${readyCount} ready to export`;
+      return `${capacity} documents · ${readyCount.toLocaleString()} ready to export`;
     }
     return `Store up to ${maxDocuments?.toLocaleString() ?? "25,000"} documents locally`;
   })();
 
   return (
-    <header className="sticky top-0 z-40 border-b border-slate-200/80 bg-white/95 backdrop-blur-sm">
+    <header className="sticky top-0 z-40 border-b border-slate-300 bg-white/95 backdrop-blur-sm">
       <div className={`mx-auto flex ${widthClass} items-center justify-between gap-4 px-4 py-3.5`}>
         <div className="flex min-w-0 items-center gap-3">
-          <Link href="/" className="shrink-0 rounded-lg transition hover:opacity-90">
+          <Link
+            href="/"
+            className="touch-target shrink-0 rounded-lg transition hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-mech-500 focus-visible:ring-offset-2"
+            aria-label="MechSweep home"
+          >
             <LogoMark className="h-9 w-9" />
           </Link>
           <div className="min-w-0">
             <Link
               href="/"
-              className="text-base font-semibold text-slate-900 hover:text-mech-700 sm:text-lg"
+              className="text-base font-semibold text-slate-900 hover:text-mech-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-mech-500 focus-visible:ring-offset-2 sm:text-lg"
             >
               MechSweep
             </Link>
-            <p className="truncate text-xs text-slate-500">{statusLine}</p>
+            <p className="truncate text-xs font-medium text-slate-600" aria-live="polite">
+              {statusLine}
+            </p>
           </div>
         </div>
 
-        <div className="flex shrink-0 items-center gap-1.5 sm:gap-2">
+        <nav
+          className="flex shrink-0 items-center gap-1 sm:gap-2"
+          aria-label="Library actions"
+        >
           <Link
             href="/libraries"
-            className="rounded-lg px-2.5 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-100 hover:text-slate-900 sm:px-3 sm:text-sm"
+            className="touch-target rounded-lg px-3 text-sm font-semibold text-slate-700 hover:bg-slate-100 hover:text-slate-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-mech-500 focus-visible:ring-offset-2"
           >
             Library
           </Link>
           {totalCount > 0 && (
-            <Button variant="ghost" size="sm" onClick={onClearAll}>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={onClearAll}
+              aria-label={`Clear all ${totalCount.toLocaleString()} documents`}
+            >
               Clear
             </Button>
           )}
@@ -82,13 +96,17 @@ export default function AppHeader({
             size="sm"
             onClick={onExport}
             disabled={readyCount === 0}
-            icon={<ExportIcon className="h-3.5 w-3.5" />}
-            title={readyCount === 0 ? "Analyze documents first" : undefined}
+            icon={<ExportIcon className="h-4 w-4" aria-hidden="true" />}
+            aria-label={
+              readyCount === 0
+                ? "Export unavailable until documents are ready"
+                : `Export ${readyCount.toLocaleString()} ready documents`
+            }
           >
             <span className="hidden sm:inline">Export</span>
-            {readyCount > 0 ? ` (${readyCount})` : ""}
+            {readyCount > 0 ? ` (${readyCount.toLocaleString()})` : ""}
           </Button>
-        </div>
+        </nav>
       </div>
     </header>
   );

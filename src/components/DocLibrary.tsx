@@ -27,6 +27,7 @@ interface DocLibraryProps {
 type SortOption = "newest" | "oldest" | "title" | "type";
 type DateFilter = "all" | "7" | "30" | "365";
 type SearchMode = "keyword" | "semantic";
+type ExportedFilter = "all" | "exported" | "not-exported";
 
 const PAGE_SIZE = 48;
 
@@ -64,6 +65,7 @@ export default function DocLibrary({
   const [categoryFilter, setCategoryFilter] = useState("all");
   const [tagFilter, setTagFilter] = useState("all");
   const [dateFilter, setDateFilter] = useState<DateFilter>("all");
+  const [exportedFilter, setExportedFilter] = useState<ExportedFilter>("all");
   const [sortBy, setSortBy] = useState<SortOption>("newest");
   const [searchMode, setSearchMode] = useState<SearchMode>("keyword");
   const [queryEmbedding, setQueryEmbedding] = useState<number[] | null>(null);
@@ -144,6 +146,8 @@ export default function DocLibrary({
         }
         if (domainFilter && normalizeCategory(d.category) !== domainFilter) return false;
         if (tagFilter !== "all" && !(d.tags ?? []).includes(tagFilter)) return false;
+        if (exportedFilter === "exported" && !d.exportedAt) return false;
+        if (exportedFilter === "not-exported" && d.exportedAt) return false;
         if (maxAgeMs && now - new Date(d.addedAt).getTime() > maxAgeMs) return false;
         if (!q) return true;
         if (searchMode === "semantic") {
@@ -185,6 +189,7 @@ export default function DocLibrary({
     domainFilter,
     tagFilter,
     dateFilter,
+    exportedFilter,
     searchMode,
     queryEmbedding,
     semanticLoading,
@@ -253,19 +258,20 @@ export default function DocLibrary({
   }
 
   return (
-    <section className="mt-8">
+    <section className="mt-8" id="main-content" aria-label="Document library">
       <div className="mb-3 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
         <div>
-          <h2 className="text-sm font-semibold text-slate-900">
+          <h2 className="text-base font-semibold text-slate-900">
             Library ({documents.length.toLocaleString()}
             {documents.length >= MAX_LIBRARY_DOCUMENTS * 0.9
               ? ` / ${MAX_LIBRARY_DOCUMENTS.toLocaleString()}`
               : ""}
             )
           </h2>
-          <p className="mt-0.5 text-xs text-slate-500">
-            Showing {firstVisible}-{lastVisible} of {filtered.length} matched documents.
-            Search scans full document text.
+          <p className="mt-0.5 text-sm text-slate-600">
+            Showing {firstVisible.toLocaleString()}-{lastVisible.toLocaleString()} of{" "}
+            {filtered.length.toLocaleString()} matched documents. Search scans full document
+            text.
           </p>
         </div>
         <div className="flex gap-2">
@@ -275,14 +281,14 @@ export default function DocLibrary({
               setSelectionMode((current) => !current);
               if (selectionMode) setSelectedIds(new Set());
             }}
-            className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+            className="action-chip border border-slate-300 bg-white text-slate-800 hover:bg-slate-50"
           >
             {selectionMode ? "Cancel selection" : "Select"}
           </button>
           <button
             type="button"
             onClick={selectVisible}
-            className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+            className="action-chip border border-slate-300 bg-white text-slate-800 hover:bg-slate-50"
           >
             Select page
           </button>
@@ -356,55 +362,175 @@ export default function DocLibrary({
         </div>
       )}
 
-      <div className="mb-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-[1fr_auto_auto_auto_auto]">
-        <input
-          type="search"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          placeholder="Search title, content, summary, tags…"
-          className="input-base"
-        />
-        <select
-          value={searchMode}
-          onChange={(e) => setSearchMode(e.target.value as SearchMode)}
-          className="select-base"
-        >
-          <option value="keyword">Keyword</option>
-          <option value="semantic">Semantic</option>
-        </select>
-        <select
-          value={statusFilter}
-          onChange={(e) => setStatusFilter(e.target.value as DocStatus | "all")}
-          className="select-base"
-        >
-          <option value="all">All status</option>
-          <option value="ready">Ready</option>
-          <option value="processing">Processing</option>
-          <option value="error">Error</option>
-        </select>
-        <select
-          value={typeFilter}
-          onChange={(e) => setTypeFilter(e.target.value as DocType | "all")}
-          className="select-base"
-        >
-          <option value="all">All types</option>
-          {DOC_TYPES.map((type) => (
-            <option key={type} value={type}>
-              {docTypeLabel(type)}
-            </option>
-          ))}
-        </select>
-        <select
-          value={sortBy}
-          onChange={(e) => setSortBy(e.target.value as SortOption)}
-          className="select-base"
-        >
-          <option value="newest">Newest</option>
-          <option value="oldest">Oldest</option>
-          <option value="title">Title</option>
-          <option value="type">Type</option>
-        </select>
-      </div>
+      <fieldset className="mb-4 space-y-3 border-0 p-0">
+        <legend className="sr-only">Search and filter documents</legend>
+
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-[1fr_auto_auto_auto_auto]">
+          <div>
+            <label htmlFor="library-search" className="filter-label">
+              Search
+            </label>
+            <input
+              id="library-search"
+              type="search"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Title, content, summary, tags…"
+              className="input-base"
+              autoComplete="off"
+            />
+          </div>
+          <div>
+            <label htmlFor="library-search-mode" className="filter-label">
+              Search mode
+            </label>
+            <select
+              id="library-search-mode"
+              value={searchMode}
+              onChange={(e) => setSearchMode(e.target.value as SearchMode)}
+              className="select-base"
+            >
+              <option value="keyword">Keyword</option>
+              <option value="semantic">Semantic</option>
+            </select>
+          </div>
+          <div>
+            <label htmlFor="library-status" className="filter-label">
+              Status
+            </label>
+            <select
+              id="library-status"
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value as DocStatus | "all")}
+              className="select-base"
+            >
+              <option value="all">All status</option>
+              <option value="ready">Ready</option>
+              <option value="processing">Processing</option>
+              <option value="error">Error</option>
+            </select>
+          </div>
+          <div>
+            <label htmlFor="library-type" className="filter-label">
+              Type
+            </label>
+            <select
+              id="library-type"
+              value={typeFilter}
+              onChange={(e) => setTypeFilter(e.target.value as DocType | "all")}
+              className="select-base"
+            >
+              <option value="all">All types</option>
+              {DOC_TYPES.map((type) => (
+                <option key={type} value={type}>
+                  {docTypeLabel(type)}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label htmlFor="library-sort" className="filter-label">
+              Sort
+            </label>
+            <select
+              id="library-sort"
+              value={sortBy}
+              onChange={(e) => setSortBy(e.target.value as SortOption)}
+              className="select-base"
+            >
+              <option value="newest">Newest</option>
+              <option value="oldest">Oldest</option>
+              <option value="title">Title</option>
+              <option value="type">Type</option>
+            </select>
+          </div>
+        </div>
+
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+          <div>
+            <label htmlFor="library-category" className="filter-label">
+              Category
+            </label>
+            <select
+              id="library-category"
+              value={categoryFilter}
+              onChange={(e) => setCategoryFilter(e.target.value)}
+              className="select-base"
+            >
+              <option value="all">All categories</option>
+              {categories.map((category) => (
+                <option key={category} value={category}>
+                  {category}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label htmlFor="library-source" className="filter-label">
+              Source
+            </label>
+            <select
+              id="library-source"
+              value={sourceFilter}
+              onChange={(e) => setSourceFilter(e.target.value as DocSource | "all")}
+              className="select-base"
+            >
+              <option value="all">All sources</option>
+              <option value="upload">Upload</option>
+              <option value="sweep">Sweep</option>
+            </select>
+          </div>
+          <div>
+            <label htmlFor="library-date" className="filter-label">
+              Date added
+            </label>
+            <select
+              id="library-date"
+              value={dateFilter}
+              onChange={(e) => setDateFilter(e.target.value as DateFilter)}
+              className="select-base"
+            >
+              <option value="all">Any date</option>
+              <option value="7">Last 7 days</option>
+              <option value="30">Last 30 days</option>
+              <option value="365">Last year</option>
+            </select>
+          </div>
+          <div>
+            <label htmlFor="library-tag" className="filter-label">
+              Tag
+            </label>
+            <select
+              id="library-tag"
+              value={tagFilter}
+              onChange={(e) => setTagFilter(e.target.value)}
+              className="select-base"
+            >
+              <option value="all">All tags</option>
+              {tags.map((tag) => (
+                <option key={tag} value={tag}>
+                  {tag}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label htmlFor="library-exported" className="filter-label">
+              Export status
+            </label>
+            <select
+              id="library-exported"
+              value={exportedFilter}
+              onChange={(e) => setExportedFilter(e.target.value as ExportedFilter)}
+              className="select-base"
+            >
+              <option value="all">All documents</option>
+              <option value="exported">Exported only</option>
+              <option value="not-exported">Not exported</option>
+            </select>
+          </div>
+        </div>
+      </fieldset>
 
       {semanticLoading && deferredSearch.trim() && searchMode === "semantic" && (
         <p className="mb-4 flex items-center gap-2 rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-sm text-sky-700">
@@ -414,56 +540,10 @@ export default function DocLibrary({
       )}
 
       {semanticError && (
-        <p className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-700">
+        <p className="mb-4 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900" role="alert">
           Semantic search unavailable: {semanticError}
         </p>
       )}
-
-      <div className="mb-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
-        <select
-          value={categoryFilter}
-          onChange={(e) => setCategoryFilter(e.target.value)}
-          className="select-base"
-        >
-          <option value="all">All categories</option>
-          {categories.map((category) => (
-            <option key={category} value={category}>
-              {category}
-            </option>
-          ))}
-        </select>
-        <select
-          value={sourceFilter}
-          onChange={(e) => setSourceFilter(e.target.value as DocSource | "all")}
-          className="select-base"
-        >
-          <option value="all">All sources</option>
-          <option value="upload">Upload</option>
-          <option value="sweep">Sweep</option>
-        </select>
-        <select
-          value={dateFilter}
-          onChange={(e) => setDateFilter(e.target.value as DateFilter)}
-          className="select-base"
-        >
-          <option value="all">Any date</option>
-          <option value="7">Last 7 days</option>
-          <option value="30">Last 30 days</option>
-          <option value="365">Last year</option>
-        </select>
-        <select
-          value={tagFilter}
-          onChange={(e) => setTagFilter(e.target.value)}
-          className="select-base"
-        >
-          <option value="all">All tags</option>
-          {tags.map((tag) => (
-            <option key={tag} value={tag}>
-              {tag}
-            </option>
-          ))}
-        </select>
-      </div>
 
       {docsWithoutEmbeddings > 0 && searchMode === "semantic" && (
         <p className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-700">
@@ -473,7 +553,7 @@ export default function DocLibrary({
       )}
 
       {filtered.length === 0 ? (
-        <p className="rounded-lg bg-slate-100 py-8 text-center text-sm text-slate-500">
+        <p className="rounded-lg bg-slate-200 py-8 text-center text-sm font-medium text-slate-700">
           {semanticLoading && deferredSearch.trim() && searchMode === "semantic"
             ? "Searching by meaning…"
             : "No documents match your filters."}
@@ -507,7 +587,8 @@ export default function DocLibrary({
                   type="button"
                   onClick={() => setPage((current) => Math.max(1, current - 1))}
                   disabled={page === 1}
-                  className="rounded-lg border border-slate-200 px-3 py-1.5 font-medium text-slate-700 disabled:cursor-not-allowed disabled:opacity-40"
+                  className="action-chip border border-slate-300 bg-white text-slate-800 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+                  aria-label="Previous page"
                 >
                   Previous
                 </button>
@@ -515,7 +596,8 @@ export default function DocLibrary({
                   type="button"
                   onClick={() => setPage((current) => Math.min(pageCount, current + 1))}
                   disabled={page === pageCount}
-                  className="rounded-lg border border-slate-200 px-3 py-1.5 font-medium text-slate-700 disabled:cursor-not-allowed disabled:opacity-40"
+                  className="action-chip border border-slate-300 bg-white text-slate-800 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+                  aria-label="Next page"
                 >
                   Next
                 </button>
