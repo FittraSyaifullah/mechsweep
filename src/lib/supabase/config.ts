@@ -7,9 +7,17 @@ export type SupabaseConfigStatus =
 export const DEFAULT_SUPABASE_PROJECT_URL =
   "https://htdlgflnlmrfoqrwmtvk.supabase.co";
 
+export function getSupabasePublishableKey(): string {
+  return (
+    process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY?.trim() ||
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY?.trim() ||
+    ""
+  );
+}
+
 export function getSupabaseConfigStatus(): SupabaseConfigStatus {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL?.trim();
-  const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY?.trim();
+  const key = getSupabasePublishableKey();
 
   if (url && key) return "ready";
   if (url && !key) return "missing_key";
