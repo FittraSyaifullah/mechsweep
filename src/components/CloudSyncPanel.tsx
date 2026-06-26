@@ -34,7 +34,8 @@ function progressLabel(progress: CloudSyncProgress | null): string {
 
 export default function CloudSyncPanel({ documents, onLibraryMerged }: CloudSyncPanelProps) {
   const { toast } = useToast();
-  const { configured, client, user, loading, signIn, signUp, signOut } = useSupabase();
+  const { configured, configStatus, projectUrl, client, user, loading, signIn, signUp, signOut } =
+    useSupabase();
   const [open, setOpen] = useState(false);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -172,16 +173,47 @@ export default function CloudSyncPanel({ documents, onLibraryMerged }: CloudSync
                 <div>
                   <p className="text-sm font-semibold text-slate-900">Connect Supabase</p>
                   <p className="mt-1 text-xs leading-relaxed text-slate-600">
-                    Add these to <code className="rounded bg-slate-100 px-1">.env.local</code>{" "}
-                    (and Vercel env vars for production), then restart the app:
+                    Project:{" "}
+                    <a
+                      href={`${projectUrl.replace(/\/$/, "")}/project/default`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="font-medium text-mech-700 hover:underline"
+                    >
+                      {projectUrl}
+                    </a>
                   </p>
                 </div>
+
+                {configStatus === "missing_key" ? (
+                  <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+                    URL is set. Add your <strong>anon public</strong> key from{" "}
+                    <a
+                      href="https://supabase.com/dashboard/project/htdlgflnlmrfoqrwmtvk/settings/api"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="font-semibold text-mech-700 hover:underline"
+                    >
+                      Supabase API settings
+                    </a>{" "}
+                    to <code className="rounded bg-white px-1">NEXT_PUBLIC_SUPABASE_ANON_KEY</code>{" "}
+                    in <code className="rounded bg-white px-1">.env.local</code>, then restart the
+                    dev server.
+                  </p>
+                ) : (
+                  <p className="text-xs text-slate-600">
+                    Add both variables to <code className="rounded bg-slate-100 px-1">.env.local</code>{" "}
+                    and Vercel, then restart.
+                  </p>
+                )}
+
                 <pre className="overflow-x-auto rounded-lg bg-slate-900 p-3 text-[11px] leading-relaxed text-slate-100">
-                  {`NEXT_PUBLIC_SUPABASE_URL=\n  https://YOUR-PROJECT.supabase.co\nNEXT_PUBLIC_SUPABASE_ANON_KEY=\n  eyJ...your-anon-key`}
+                  {`NEXT_PUBLIC_SUPABASE_URL=${projectUrl}\nNEXT_PUBLIC_SUPABASE_ANON_KEY=eyJ...paste-anon-key`}
                 </pre>
                 <p className="text-xs text-slate-600">
-                  Run <code className="rounded bg-slate-100 px-1">supabase/migrations/001_library.sql</code>{" "}
-                  in the Supabase SQL Editor, then enable Email auth.
+                  Run{" "}
+                  <code className="rounded bg-slate-100 px-1">supabase/migrations/001_library.sql</code>{" "}
+                  in the Supabase SQL Editor if you have not already.
                 </p>
               </div>
             ) : user ? (

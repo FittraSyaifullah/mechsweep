@@ -9,11 +9,13 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { createSupabaseBrowserClient, isSupabaseConfigured } from "@/lib/supabase/client";
+import { createSupabaseBrowserClient, getSupabaseConfigStatus, isSupabaseConfigured, supabaseProjectUrl } from "@/lib/supabase/client";
 import type { Session, SupabaseClient, User } from "@supabase/supabase-js";
 
 interface SupabaseContextValue {
   configured: boolean;
+  configStatus: ReturnType<typeof getSupabaseConfigStatus>;
+  projectUrl: string;
   client: SupabaseClient | null;
   session: Session | null;
   user: User | null;
@@ -26,7 +28,9 @@ interface SupabaseContextValue {
 const SupabaseContext = createContext<SupabaseContextValue | null>(null);
 
 export function SupabaseProvider({ children }: { children: ReactNode }) {
+  const configStatus = getSupabaseConfigStatus();
   const configured = isSupabaseConfigured();
+  const projectUrl = supabaseProjectUrl();
   const client = useMemo(() => (configured ? createSupabaseBrowserClient() : null), [configured]);
   const [session, setSession] = useState<Session | null>(null);
   const [loading, setLoading] = useState(configured);
@@ -88,6 +92,8 @@ export function SupabaseProvider({ children }: { children: ReactNode }) {
   const value = useMemo(
     () => ({
       configured,
+      configStatus,
+      projectUrl,
       client,
       session,
       user: session?.user ?? null,
@@ -96,7 +102,7 @@ export function SupabaseProvider({ children }: { children: ReactNode }) {
       signUp,
       signOut,
     }),
-    [configured, client, session, loading, signIn, signUp, signOut]
+    [configured, configStatus, projectUrl, client, session, loading, signIn, signUp, signOut]
   );
 
   return <SupabaseContext.Provider value={value}>{children}</SupabaseContext.Provider>;
