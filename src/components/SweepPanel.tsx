@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import { SWEEP_BATCH_SIZE, ANALYZE_CONCURRENCY } from "@/lib/constants";
 import { runWithConcurrency } from "@/lib/concurrency";
 import { runBatchedSweep } from "@/lib/sweep-client";
+import { runSweepAgent, type SweepAgentStep } from "@/lib/sweep-agent";
 import { dedupeSweepResultsByUrl, isDocumentUrlKnown } from "@/lib/duplicates";
 import { resolveSweepSessionMax, sweepBatchCount } from "@/lib/sweep-limits";
 import { formatUserError, relevancePercent } from "@/lib/user-messages";
@@ -11,6 +12,7 @@ import type { SweepResult } from "@/types";
 import Alert from "@/components/ui/Alert";
 import Button from "@/components/ui/Button";
 import EmptyState from "@/components/ui/EmptyState";
+import SweepAgentLog from "@/components/SweepAgentLog";
 import { GlobeIcon, SearchIcon, Spinner } from "@/components/ui/Icons";
 import ProgressBar from "@/components/ui/ProgressBar";
 import { useToast } from "@/components/Toast";
@@ -47,6 +49,8 @@ export default function SweepPanel({ onAdd, addedUrls, onAddedToLibrary }: Sweep
   const [batchProgress, setBatchProgress] = useState<{ current: number; total: number } | null>(
     null
   );
+  const [agentSteps, setAgentSteps] = useState<SweepAgentStep[] | null>(null);
+  const [previewMode, setPreviewMode] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [hasSearched, setHasSearched] = useState(false);
   const [provider, setProvider] = useState<string | null>(null);
@@ -60,7 +64,7 @@ export default function SweepPanel({ onAdd, addedUrls, onAddedToLibrary }: Sweep
     [error]
   );
 
-  async function handleSweep(searchQuery?: string, append = false) {
+  async function handlePreviewSweep(searchQuery?: string, append = false) {
     const q = (searchQuery ?? query).trim();
     if (!q) {
       toast("Enter a search topic first", "info");
@@ -71,6 +75,7 @@ export default function SweepPanel({ onAdd, addedUrls, onAddedToLibrary }: Sweep
     setLoading(true);
     setError(null);
     setBatchProgress(null);
+    setAgentSteps(null);
     setHasSearched(true);
     setLastQuery(q);
     const resultCountBefore = append ? results.length : 0;
@@ -114,6 +119,66 @@ export default function SweepPanel({ onAdd, addedUrls, onAddedToLibrary }: Sweep
     }
   }
 
+  async function handleAgentSweep(searchQuery?: string) {
+    const q = (searchQuery ?? query).trim();
+    if (!q) {
+      toast("Enter a search topic first", "info");
+      return;
+    }
+    if (searchQuery) setQuery(searchQuery);
+
+    setLoading(true);
+    setAdding(true);
+    setError(null);
+    setBatchProgress(null);
+    setAgentSteps(null);
+    setHasSearched(true);
+    setLastQuery(q);
+
+    try {
+      const outcome = await runSweepAgent({
+        query: q,
+        excludeUrls: Array.from(addedUrls),
+        onAdd,
+        onSteps: setAgentSteps,
+        onBatchProgress: (current, total) => setBatchProgress({ current, total }),
+      });
+
+      setProvider(outcome.provider ?? "exa");
+      setResults(dedupeSweepResultsByUrl(outcome.results));
+
+      if (outcome.added > 0) {
+        toast(
+          `Sweep agent added ${outcome.added} document${outcome.added !== 1 ? "s" : ""} to library`,
+          "success"
+        );
+        onAddedToLibrary?.(outcome.added);
+      } else if (outcome.results.length === 0) {
+        toast("No documents found — try different keywords", "info");
+      } else {
+        toast("All results were already in your library", "info");
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Sweep failed";
+      setError(message);
+      setResults([]);
+    } finally {
+      setLoading(false);
+      setAdding(false);
+      setBatchProgress(null);
+    }
+  }
+
+  function handleSweep(searchQuery?: string, append = false) {
+    if (previewMode) {
+      return handlePreviewSweep(searchQuery, append);
+    }
+    if (append) {
+      return handlePreviewSweep(searchQuery, true);
+    }
+    return handleAgentSweep(searchQuery);
+  }
+
   async function handleAddAll() {
     const pending = results.filter((r) => !isDocumentUrlKnown(r.url, addedUrls));
     if (pending.length === 0 || adding) return;
@@ -133,6 +198,7 @@ export default function SweepPanel({ onAdd, addedUrls, onAddedToLibrary }: Sweep
   }
 
   const busy = loading || adding;
+  const showAgentLog = !previewMode && agentSteps !== null;
 
   return (
     <div className="space-y-5">
@@ -152,12 +218,12 @@ export default function SweepPanel({ onAdd, addedUrls, onAddedToLibrary }: Sweep
         </div>
         <Button
           onClick={() => void handleSweep()}
-          loading={loading}
-          disabled={adding}
+          loading={loading && !showAgentLog}
+          disabled={adding && !loading}
           icon={!loading ? <SearchIcon className="h-4 w-4" /> : undefined}
           className="sm:shrink-0"
         >
-          {loading ? "Searching…" : "Sweep"}
+          {loading ? (showAgentLog ? "Agent sweeping…" : "Searching…") : "Sweep"}
         </Button>
       </div>
 
@@ -177,14 +243,30 @@ export default function SweepPanel({ onAdd, addedUrls, onAddedToLibrary }: Sweep
 
       <details className="rounded-lg border border-slate-100 bg-slate-50/80 px-3 py-2 text-xs text-slate-500">
         <summary className="cursor-pointer select-none font-medium text-slate-600">
-          How sweeps work
+          Sweep settings
         </summary>
-        <p className="mt-2 leading-relaxed">
-          Powered by Exa — collects up to {sessionMax} unique documents per run ({plannedBatches}{" "}
-          batches of {SWEEP_BATCH_SIZE}). Documents you add are excluded from future sweeps. Use{" "}
-          <strong className="font-medium text-slate-700">Sweep more</strong> to fetch another batch
-          without starting over.
-        </p>
+        <div className="mt-2 space-y-2 leading-relaxed">
+          <label className="flex cursor-pointer items-start gap-2">
+            <input
+              type="checkbox"
+              checked={previewMode}
+              onChange={(e) => setPreviewMode(e.target.checked)}
+              disabled={busy}
+              className="mt-0.5 rounded border-slate-300 text-mech-600 focus:ring-mech-500"
+            />
+            <span>
+              <span className="font-medium text-slate-700">Preview before adding</span>
+              <span className="block text-slate-500">
+                Search only — review results and add manually. Off by default: the sweep agent
+                searches and adds new documents automatically.
+              </span>
+            </span>
+          </label>
+          <p>
+            Powered by Exa — up to {sessionMax} unique documents per run ({plannedBatches} batches
+            of {SWEEP_BATCH_SIZE}). Documents in your library are excluded from future sweeps.
+          </p>
+        </div>
       </details>
 
       {userError && (
@@ -194,20 +276,24 @@ export default function SweepPanel({ onAdd, addedUrls, onAddedToLibrary }: Sweep
           detail={userError.detail}
           onRetry={
             userError.retryable && lastQuery
-              ? () => void handleSweep(lastQuery, results.length > 0)
+              ? () => void handleSweep(lastQuery, results.length > 0 && previewMode)
               : undefined
           }
         />
       )}
 
-      {addProgress && (
+      {showAgentLog && agentSteps && (
+        <SweepAgentLog steps={agentSteps} batchProgress={loading ? batchProgress : null} />
+      )}
+
+      {addProgress && !showAgentLog && (
         <div className="flex items-center gap-2 rounded-lg border border-sky-200 bg-sky-50 px-3 py-2.5 text-sm text-sky-800">
           <Spinner className="h-4 w-4 shrink-0" />
           {addProgress}
         </div>
       )}
 
-      {loading && (
+      {loading && previewMode && (
         <div className="space-y-4 rounded-lg border border-slate-200 bg-slate-50/50 px-4 py-6">
           <div className="flex items-center justify-center gap-2 text-sm text-slate-600">
             <Spinner className="h-5 w-5 text-mech-600" />
@@ -234,7 +320,7 @@ export default function SweepPanel({ onAdd, addedUrls, onAddedToLibrary }: Sweep
         <EmptyState
           icon={<GlobeIcon className="h-7 w-7" />}
           title="Discover engineering documents"
-          description="Search for PDFs, datasheets, textbooks, standards, and CAD files across the web. Pick a suggestion or type your own topic."
+          description="Click Sweep to run the agent — it searches the web and adds new documents to your library automatically."
         />
       )}
 
@@ -277,15 +363,17 @@ export default function SweepPanel({ onAdd, addedUrls, onAddedToLibrary }: Sweep
               >
                 Sweep more
               </Button>
-              <Button
-                variant="secondary"
-                size="sm"
-                onClick={() => void handleAddAll()}
-                disabled={busy || pendingCount === 0}
-                loading={adding}
-              >
-                Add all{pendingCount > 0 ? ` (${pendingCount})` : ""}
-              </Button>
+              {previewMode && (
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => void handleAddAll()}
+                  disabled={busy || pendingCount === 0}
+                  loading={adding}
+                >
+                  Add all{pendingCount > 0 ? ` (${pendingCount})` : ""}
+                </Button>
+              )}
             </div>
           </div>
 

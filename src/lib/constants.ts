@@ -49,3 +49,6 @@ export const SWEEP_MAX_BATCHES = 10;
 
 /** Parallel document analyses (fetch + AI classify) in the browser. */
 export const ANALYZE_CONCURRENCY = 4;
+
+/** In-memory ZIP fallback when showSaveFilePicker is unavailable. */
+export const MEMORY_ZIP_MAX_DOCUMENTS = 500;

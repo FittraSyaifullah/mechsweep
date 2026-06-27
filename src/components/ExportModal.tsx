@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import type { ExportOptions, MechDocument } from "@/types";
+import { MEMORY_ZIP_MAX_DOCUMENTS } from "@/lib/constants";
 import { useToast } from "@/components/Toast";
 import {
   exportDocumentsToFolder,
@@ -9,12 +10,17 @@ import {
   type FolderExportProgress,
 } from "@/lib/export-folder";
 import {
+  exportDocumentsToZip,
+  exportDocumentsToZipBuffer,
+  isStreamingZipSupported,
+  type ZipExportProgress,
+} from "@/lib/export-zip";
+import {
   downloadExport,
   exportToCsv,
   exportToJson,
   exportToPdf,
   exportToTxt,
-  exportToZip,
 } from "@/lib/exporter";
 import Button from "@/components/ui/Button";
 import { CloseIcon } from "@/components/ui/Icons";
@@ -30,12 +36,22 @@ interface ExportModalProps {
   title?: string;
 }
 
+type ExportProgress = FolderExportProgress | ZipExportProgress;
+
 function slugifyFilename(value: string): string {
   return value
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-|-$/g, "")
     .slice(0, 80);
+}
+
+function progressLabel(progress: ExportProgress): string {
+  if (progress.phase === "preparing") return "Preparing export…";
+  if (progress.phase === "metadata") return "Writing manifest and index…";
+  const pct =
+    progress.total > 0 ? Math.round((progress.completed / progress.total) * 100) : 0;
+  return `Writing documents… ${progress.completed.toLocaleString()} / ${progress.total.toLocaleString()} (${pct}%)`;
 }
 
 export default function ExportModal({
@@ -56,8 +72,9 @@ export default function ExportModal({
     includeTags: true,
   });
   const [exporting, setExporting] = useState(false);
-  const [folderProgress, setFolderProgress] = useState<FolderExportProgress | null>(null);
+  const [exportProgress, setExportProgress] = useState<ExportProgress | null>(null);
   const folderExportSupported = isFolderExportSupported();
+  const streamingZipSupported = isStreamingZipSupported();
 
   const readyDocs = documents.filter((d) => d.status === "ready");
 
@@ -81,7 +98,7 @@ export default function ExportModal({
         : `mechsweep-${timestamp}`;
 
     const exporters: Record<
-      ExportOptions["format"],
+      Exclude<ExportOptions["format"], "zip">,
       { content: BlobPart; extension: string; mimeType: string }
     > = {
       txt: {
@@ -104,18 +121,69 @@ export default function ExportModal({
         extension: "pdf",
         mimeType: "application/pdf",
       },
-      zip: {
-        content: exportToZip(readyDocs, options),
-        extension: "zip",
-        mimeType: "application/zip",
-      },
     };
 
-    return { filenameBase, selected: exporters[options.format] };
+    return { filenameBase, selected: exporters[options.format as Exclude<ExportOptions["format"], "zip">] };
+  }
+
+  async function handleZipDownload() {
+    if (readyDocs.length === 0 || exporting) return;
+
+    setExporting(true);
+    setExportProgress(null);
+
+    try {
+      if (streamingZipSupported) {
+        const result = await exportDocumentsToZip(readyDocs, options, setExportProgress);
+        onExported?.({
+          mode: "download",
+          documentIds: readyDocs.map((doc) => doc.id),
+          fileCount: result.fileCount,
+        });
+        toast(
+          `Saved ${result.documentCount.toLocaleString()} documents to ${result.filename}`,
+          "success"
+        );
+        onClose();
+        return;
+      }
+
+      if (readyDocs.length > MEMORY_ZIP_MAX_DOCUMENTS) {
+        toast(
+          `ZIP export for ${readyDocs.length.toLocaleString()} documents needs Chrome or Edge. Use Export to folder instead.`,
+          "error"
+        );
+        return;
+      }
+
+      const timestamp = new Date().toISOString().slice(0, 10);
+      const filename = `mechsweep-${timestamp}-${readyDocs.length}-docs.zip`;
+      const buffer = await exportDocumentsToZipBuffer(readyDocs, options, setExportProgress);
+      downloadExport(buffer, filename, "application/zip");
+      onExported?.({
+        mode: "download",
+        documentIds: readyDocs.map((doc) => doc.id),
+        fileCount: readyDocs.length + 3,
+      });
+      onClose();
+    } catch (err) {
+      if (err instanceof DOMException && err.name === "AbortError") return;
+      const message = err instanceof Error ? err.message : "Could not export ZIP";
+      toast(message, "error");
+    } finally {
+      setExporting(false);
+      setExportProgress(null);
+    }
   }
 
   async function handleDownload() {
     if (readyDocs.length === 0) return;
+
+    if (options.format === "zip") {
+      await handleZipDownload();
+      return;
+    }
+
     const { filenameBase, selected } = buildDownloadPayload();
     downloadExport(
       selected.content,
@@ -129,9 +197,9 @@ export default function ExportModal({
   async function handleFolderExport() {
     if (readyDocs.length === 0 || exporting) return;
     setExporting(true);
-    setFolderProgress(null);
+    setExportProgress(null);
     try {
-      const result = await exportDocumentsToFolder(readyDocs, options, setFolderProgress);
+      const result = await exportDocumentsToFolder(readyDocs, options, setExportProgress);
       onExported?.({
         mode: "folder",
         documentIds: readyDocs.map((doc) => doc.id),
@@ -145,17 +213,11 @@ export default function ExportModal({
       toast(message, "error");
     } finally {
       setExporting(false);
-      setFolderProgress(null);
+      setExportProgress(null);
     }
   }
 
-  function folderProgressLabel(progress: FolderExportProgress): string {
-    if (progress.phase === "preparing") return "Preparing folder export…";
-    if (progress.phase === "metadata") return "Writing manifest and index…";
-    const pct =
-      progress.total > 0 ? Math.round((progress.completed / progress.total) * 100) : 0;
-    return `Writing documents… ${progress.completed.toLocaleString()} / ${progress.total.toLocaleString()} (${pct}%)`;
-  }
+  const zipUsesStreaming = options.format === "zip" && streamingZipSupported;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
@@ -287,26 +349,38 @@ export default function ExportModal({
             </label>
           ))}
 
-          {folderExportSupported ? (
+          {options.format === "zip" ? (
+            <p className="rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-600">
+              {streamingZipSupported ? (
+                <>
+                  ZIP download streams one document at a time to disk — works for libraries of any
+                  size. You&apos;ll pick where to save the file.
+                </>
+              ) : (
+                <>
+                  Large ZIP exports need Chrome or Edge. Up to{" "}
+                  {MEMORY_ZIP_MAX_DOCUMENTS.toLocaleString()} documents can download in other
+                  browsers, or use Export to folder.
+                </>
+              )}
+            </p>
+          ) : folderExportSupported ? (
             <p className="rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-600">
               Export to folder writes{" "}
               <span className="font-medium">manifest.json</span>,{" "}
-              <span className="font-medium">corpus.json</span>, chunk files, and one
-              text file per document under <span className="font-medium">documents/</span>.
-              Streams one document at a time — works for libraries of any size in Chrome or Edge.
+              <span className="font-medium">corpus.json</span>, chunk files, and one text file per
+              document under <span className="font-medium">documents/</span>.
             </p>
-          ) : (
-            <p className="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800">
-              Folder export needs Chrome or Edge. Use ZIP download for the same layout
-              in one file.
-            </p>
-          )}
+          ) : null}
         </div>
 
-        {folderProgress && (
+        {exportProgress && (
           <p className="mt-3 flex items-center gap-2 rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-xs text-sky-800">
-            <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-sky-600 border-t-transparent" aria-hidden="true" />
-            {folderProgressLabel(folderProgress)}
+            <span
+              className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-sky-600 border-t-transparent"
+              aria-hidden="true"
+            />
+            {progressLabel(exportProgress)}
           </p>
         )}
 
@@ -321,7 +395,7 @@ export default function ExportModal({
               onClick={() => void handleFolderExport()}
               disabled={readyDocs.length === 0 || exporting}
             >
-              {exporting ? "Exporting…" : "Export to folder"}
+              {exporting && !zipUsesStreaming ? "Exporting…" : "Export to folder"}
             </Button>
           )}
           <Button
@@ -329,7 +403,11 @@ export default function ExportModal({
             onClick={() => void handleDownload()}
             disabled={readyDocs.length === 0 || exporting}
           >
-            Download
+            {exporting && (zipUsesStreaming || options.format === "zip")
+              ? "Exporting ZIP…"
+              : options.format === "zip"
+                ? "Download ZIP"
+                : "Download"}
           </Button>
         </div>
       </div>

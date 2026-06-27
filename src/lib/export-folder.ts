@@ -1,7 +1,4 @@
-import {
-  applyDocumentBlob,
-  readDocumentBlob,
-} from "@/lib/document-blobs";
+import { hydrateDocumentForExport } from "@/lib/export-hydrate";
 import {
   buildDocumentExportPath,
   buildExportChunksForDocument,
@@ -40,14 +37,6 @@ export function isFolderExportSupported(): boolean {
     window.isSecureContext &&
     typeof (window as DirectoryPickerWindow).showDirectoryPicker === "function"
   );
-}
-
-async function hydrateDocumentForExport(doc: MechDocument): Promise<MechDocument> {
-  if (doc.blobStored && !doc.content) {
-    const blob = await readDocumentBlob(doc.id);
-    if (blob) return applyDocumentBlob(doc, blob);
-  }
-  return doc;
 }
 
 async function getNestedDirectoryHandle(
