@@ -9,6 +9,7 @@ import DocLibrary from "@/components/DocLibrary";
 import ExportModal from "@/components/ExportModal";
 import SweepPanel from "@/components/SweepPanel";
 import UploadZone from "@/components/UploadZone";
+import ImportFolderZone from "@/components/ImportFolderZone";
 import ConfirmDialog from "@/components/ui/ConfirmDialog";
 import { ChevronIcon, GlobeIcon, Spinner, UploadIcon } from "@/components/ui/Icons";
 import { useDocumentLibrary } from "@/hooks/useDocumentLibrary";
@@ -156,12 +157,20 @@ export default function Home() {
                     onAddedToLibrary={() => scrollToLibrary()}
                   />
                 ) : (
-                  <UploadZone
-                    onUpload={async (files) => {
-                      await library.addFromUpload(files);
-                      scrollToLibrary();
-                    }}
-                  />
+                  <div className="space-y-6">
+                    <UploadZone
+                      onUpload={async (files) => {
+                        await library.addFromUpload(files);
+                        scrollToLibrary();
+                      }}
+                    />
+                    <ImportFolderZone
+                      onImport={async (documents) => {
+                        await library.addFromFolderImport(documents);
+                        scrollToLibrary();
+                      }}
+                    />
+                  </div>
                 )}
               </div>
             </>

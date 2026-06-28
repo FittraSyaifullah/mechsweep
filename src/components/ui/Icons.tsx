@@ -59,6 +59,14 @@ export function ExportIcon({ className = "h-4 w-4" }: IconProps) {
   );
 }
 
+export function FolderIcon({ className = "h-4 w-4" }: IconProps) {
+  return (
+    <svg className={className} viewBox="0 0 20 20" fill="currentColor" aria-hidden>
+      <path d="M3.5 6A1.5 1.5 0 015 4.5h3.379a1.5 1.5 0 011.06.44l1.122 1.12A1.5 1.5 0 0011.621 6.5H15A1.5 1.5 0 0116.5 8v7.5A1.5 1.5 0 0115 17H5a1.5 1.5 0 01-1.5-1.5V6z" />
+    </svg>
+  );
+}
+
 export function CloseIcon({ className = "h-5 w-5" }: IconProps) {
   return (
     <svg className={className} viewBox="0 0 20 20" fill="currentColor" aria-hidden>

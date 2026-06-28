@@ -36,6 +36,7 @@ import {
 } from "@/lib/storage";
 import type { AnalyzeResult, MechDocument, SweepResult } from "@/types";
 import type { UploadedFile } from "@/components/UploadZone";
+import type { FolderImportDocument } from "@/lib/import-folder";
 
 const ANALYZE_CLIENT_CHARS = 4000;
 
@@ -572,6 +573,101 @@ export function useDocumentLibrary(options: UseDocumentLibraryOptions = {}) {
     [analyzeAndEmbed, documents, toast]
   );
 
+  const addFromFolderImport = useCallback(
+    async (imports: FolderImportDocument[]) => {
+      const remaining = remainingLibraryCapacity(documents.length);
+      if (remaining === 0) {
+        toast(`Library full (${MAX_LIBRARY_DOCUMENTS} documents). Remove some to add more.`, "error");
+        return;
+      }
+
+      const importsToProcess = imports.slice(0, remaining);
+      if (importsToProcess.length < imports.length) {
+        toast(
+          `Only ${remaining} slot${remaining !== 1 ? "s" : ""} left — importing first ${remaining.toLocaleString()} document(s)`,
+          "info"
+        );
+      }
+
+      const existingIds = new Set(documents.map((doc) => doc.id));
+      const newDocs: MechDocument[] = [];
+      const skipped: string[] = [];
+
+      for (const imported of importsToProcess) {
+        if (!imported.content.trim()) {
+          skipped.push(imported.title);
+          continue;
+        }
+
+        const contentHash = imported.contentHash || (await hashContent(imported.content));
+        const duplicate = findDuplicateDocument([...documents, ...newDocs], {
+          contentHash,
+          url: imported.url,
+          title: imported.title,
+        });
+
+        if (duplicate) {
+          skipped.push(imported.title);
+          continue;
+        }
+
+        const hasExportedMetadata = Boolean(imported.summary || imported.category);
+        const id =
+          imported.id && !existingIds.has(imported.id) && !newDocs.some((doc) => doc.id === imported.id)
+            ? imported.id
+            : uuidv4();
+
+        existingIds.add(id);
+
+        newDocs.push({
+          id,
+          title: imported.title,
+          type: imported.type,
+          source: imported.source,
+          url: imported.url,
+          content: imported.content,
+          contentHash,
+          summary: imported.summary,
+          tags: imported.tags,
+          category: imported.category,
+          pageCount: imported.pageCount ?? undefined,
+          addedAt: imported.addedAt ?? new Date().toISOString(),
+          status: hasExportedMetadata ? "ready" : "processing",
+        });
+      }
+
+      if (newDocs.length === 0) {
+        toast(
+          skipped.length > 0 ? "All documents were empty or already in your library" : "No documents imported",
+          "info"
+        );
+        return;
+      }
+
+      setDocuments((prev) => {
+        const next = [...newDocs, ...prev];
+        void flushDocuments(next);
+        return next;
+      });
+
+      toast(
+        skipped.length > 0
+          ? `Imported ${newDocs.length.toLocaleString()}; skipped ${skipped.length.toLocaleString()} duplicate(s)`
+          : `Imported ${newDocs.length.toLocaleString()} document${newDocs.length !== 1 ? "s" : ""}`,
+        "success"
+      );
+
+      await runWithConcurrency(newDocs, ANALYZE_CONCURRENCY, async (doc) => {
+        if (doc.summary || doc.category) {
+          await embedDoc(doc.id, doc.content, doc.title);
+          return;
+        }
+        await analyzeAndEmbed(doc.id, doc.content, doc.title, doc.type, doc.category);
+      });
+    },
+    [analyzeAndEmbed, documents, embedDoc, toast]
+  );
+
   const retryDoc = useCallback(
     async (doc: MechDocument) => {
       if (doc.source === "sweep" && doc.url) {
@@ -683,6 +779,7 @@ export function useDocumentLibrary(options: UseDocumentLibraryOptions = {}) {
     remainingCapacity: remainingLibraryCapacity(documents.length),
     addFromSweep,
     addFromUpload,
+    addFromFolderImport,
     retryDoc,
     requestRemoveDoc,
     requestBulkDelete,
