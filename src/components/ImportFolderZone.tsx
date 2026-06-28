@@ -12,6 +12,7 @@ import {
 } from "@/lib/import-folder";
 import Alert from "@/components/ui/Alert";
 import Button from "@/components/ui/Button";
+import ProgressBar from "@/components/ui/ProgressBar";
 import { FolderIcon, Spinner } from "@/components/ui/Icons";
 
 interface ImportFolderZoneProps {
@@ -136,10 +137,15 @@ export default function ImportFolderZone({ onImport }: ImportFolderZoneProps) {
       )}
 
       {progress && (
-        <p className="flex items-center gap-2 rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-xs text-sky-800">
-          <Spinner className="h-3 w-3 shrink-0" />
-          {progressLabel(progress)}
-        </p>
+        <div className="space-y-2 rounded-lg border border-sky-200 bg-sky-50 px-3 py-2">
+          <p className="flex items-center gap-2 text-xs text-sky-800">
+            <Spinner className="h-3 w-3 shrink-0" />
+            {progressLabel(progress)}
+          </p>
+          {progress.phase === "reading" && progress.total > 0 && (
+            <ProgressBar value={progress.completed} max={progress.total} label="Import progress" />
+          )}
+        </div>
       )}
 
       {error && (

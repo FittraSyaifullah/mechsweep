@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import type { ExportOptions, MechDocument } from "@/types";
 import { MEMORY_ZIP_MAX_DOCUMENTS } from "@/lib/constants";
+import { SYNC_EXPORT_MAX_DOCUMENTS } from "@/lib/scheduling";
 import { useToast } from "@/components/Toast";
 import {
   exportDocumentsToFolder,
@@ -23,7 +24,8 @@ import {
   exportToTxt,
 } from "@/lib/exporter";
 import Button from "@/components/ui/Button";
-import { CloseIcon } from "@/components/ui/Icons";
+import ProgressBar from "@/components/ui/ProgressBar";
+import { CloseIcon, Spinner } from "@/components/ui/Icons";
 
 interface ExportModalProps {
   documents: MechDocument[];
@@ -130,7 +132,7 @@ export default function ExportModal({
     if (readyDocs.length === 0 || exporting) return;
 
     setExporting(true);
-    setExportProgress(null);
+    setExportProgress({ phase: "preparing", completed: 0, total: readyDocs.length });
 
     try {
       if (streamingZipSupported) {
@@ -184,20 +186,36 @@ export default function ExportModal({
       return;
     }
 
-    const { filenameBase, selected } = buildDownloadPayload();
-    downloadExport(
-      selected.content,
-      `${filenameBase}.${selected.extension}`,
-      selected.mimeType
-    );
-    onExported?.({ mode: "download", documentIds: readyDocs.map((doc) => doc.id) });
-    onClose();
+    if (readyDocs.length > SYNC_EXPORT_MAX_DOCUMENTS) {
+      toast(
+        `${readyDocs.length.toLocaleString()} documents is too large for a single ${options.format.toUpperCase()} file. Use ZIP download or Export to folder.`,
+        "error"
+      );
+      return;
+    }
+
+    setExporting(true);
+    setExportProgress({ phase: "preparing", completed: 0, total: readyDocs.length });
+
+    try {
+      const { filenameBase, selected } = buildDownloadPayload();
+      downloadExport(
+        selected.content,
+        `${filenameBase}.${selected.extension}`,
+        selected.mimeType
+      );
+      onExported?.({ mode: "download", documentIds: readyDocs.map((doc) => doc.id) });
+      onClose();
+    } finally {
+      setExporting(false);
+      setExportProgress(null);
+    }
   }
 
   async function handleFolderExport() {
     if (readyDocs.length === 0 || exporting) return;
     setExporting(true);
-    setExportProgress(null);
+    setExportProgress({ phase: "preparing", completed: 0, total: readyDocs.length });
     try {
       const result = await exportDocumentsToFolder(readyDocs, options, setExportProgress);
       onExported?.({
@@ -217,7 +235,6 @@ export default function ExportModal({
     }
   }
 
-  const zipUsesStreaming = options.format === "zip" && streamingZipSupported;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
@@ -353,8 +370,8 @@ export default function ExportModal({
             <p className="rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-600">
               {streamingZipSupported ? (
                 <>
-                  ZIP download streams one document at a time to disk — works for libraries of any
-                  size. You&apos;ll pick where to save the file.
+                  ZIP streams one document at a time. Progress updates while exporting — the page
+                  stays responsive for {readyDocs.length.toLocaleString()} documents.
                 </>
               ) : (
                 <>
@@ -366,22 +383,32 @@ export default function ExportModal({
             </p>
           ) : folderExportSupported ? (
             <p className="rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-600">
-              Export to folder writes{" "}
-              <span className="font-medium">manifest.json</span>,{" "}
-              <span className="font-medium">corpus.json</span>, chunk files, and one text file per
-              document under <span className="font-medium">documents/</span>.
+              For {readyDocs.length.toLocaleString()} documents, use{" "}
+              <span className="font-medium">Export to folder</span> or{" "}
+              <span className="font-medium">Download ZIP</span>. Single-file{" "}
+              {options.format.toUpperCase()} export is limited to{" "}
+              {SYNC_EXPORT_MAX_DOCUMENTS.toLocaleString()} documents.
             </p>
           ) : null}
         </div>
 
-        {exportProgress && (
-          <p className="mt-3 flex items-center gap-2 rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-xs text-sky-800">
-            <span
-              className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-sky-600 border-t-transparent"
-              aria-hidden="true"
-            />
-            {progressLabel(exportProgress)}
-          </p>
+        {exporting && (
+          <div
+            className="mt-3 space-y-2 rounded-lg border border-sky-200 bg-sky-50 px-3 py-3"
+            aria-live="polite"
+          >
+            <div className="flex items-center gap-2 text-xs text-sky-800">
+              <Spinner className="h-3 w-3 shrink-0" />
+              {exportProgress ? progressLabel(exportProgress) : "Starting export…"}
+            </div>
+            {exportProgress && exportProgress.phase === "documents" && exportProgress.total > 0 && (
+              <ProgressBar
+                value={exportProgress.completed}
+                max={exportProgress.total}
+                label="Export progress"
+              />
+            )}
+          </div>
         )}
 
         <div className="mt-5 flex flex-wrap justify-end gap-2">
@@ -395,7 +422,7 @@ export default function ExportModal({
               onClick={() => void handleFolderExport()}
               disabled={readyDocs.length === 0 || exporting}
             >
-              {exporting && !zipUsesStreaming ? "Exporting…" : "Export to folder"}
+              {exporting ? "Exporting…" : "Export to folder"}
             </Button>
           )}
           <Button
@@ -403,11 +430,7 @@ export default function ExportModal({
             onClick={() => void handleDownload()}
             disabled={readyDocs.length === 0 || exporting}
           >
-            {exporting && (zipUsesStreaming || options.format === "zip")
-              ? "Exporting ZIP…"
-              : options.format === "zip"
-                ? "Download ZIP"
-                : "Download"}
+            {exporting ? "Exporting…" : options.format === "zip" ? "Download ZIP" : "Download"}
           </Button>
         </div>
       </div>

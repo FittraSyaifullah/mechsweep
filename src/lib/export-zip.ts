@@ -1,19 +1,9 @@
 import { hydrateDocumentForExport } from "@/lib/export-hydrate";
-import {
-  buildDocumentExportPath,
-  buildExportChunksForDocument,
-  buildExportManifest,
-  buildFolderCorpusIndex,
-  exportToTxt,
-} from "@/lib/exporter";
+import { streamExportDocuments, type StreamExportProgress } from "@/lib/export-stream";
 import { MemoryZipTarget, ZipStreamWriter } from "@/lib/zip-writer";
 import type { ExportOptions, MechDocument } from "@/types";
 
-export interface ZipExportProgress {
-  phase: "preparing" | "documents" | "metadata";
-  completed: number;
-  total: number;
-}
+export type ZipExportProgress = StreamExportProgress;
 
 export interface ZipExportResult {
   filename: string;
@@ -46,42 +36,25 @@ async function writeArchiveToZip(
   documents: MechDocument[],
   options: ExportOptions,
   onProgress?: (progress: ZipExportProgress) => void
-): Promise<{ exportPaths: string[]; chunkCount: number }> {
-  const exportPaths: string[] = [];
-  let chunkCount = 0;
-  const chunksPath = `${options.preset}-chunks.jsonl`;
-  const chunksWriter = await writer.openStreamingEntry(chunksPath);
+): Promise<void> {
+  let chunksWriter: Awaited<ReturnType<ZipStreamWriter["openStreamingEntry"]>> | null = null;
 
-  onProgress?.({ phase: "preparing", completed: 0, total: documents.length });
-
-  for (let index = 0; index < documents.length; index++) {
-    const hydrated = await hydrateDocumentForExport(documents[index]!);
-    const exportPath = buildDocumentExportPath(index, documents.length, hydrated.title);
-    exportPaths.push(exportPath);
-
-    await writer.addStoredEntry(exportPath, exportToTxt([hydrated], options));
-
-    for (const chunk of buildExportChunksForDocument(hydrated, options)) {
-      await chunksWriter.writeText(`${JSON.stringify(chunk)}\n`);
-      chunkCount += 1;
-    }
-
-    onProgress?.({ phase: "documents", completed: index + 1, total: documents.length });
-  }
-
-  await chunksWriter.close();
-
-  onProgress?.({ phase: "metadata", completed: 0, total: 2 });
-
-  const manifest = buildExportManifest(documents, options, chunkCount);
-  await writer.addStoredEntry("manifest.json", JSON.stringify(manifest, null, 2));
-  onProgress?.({ phase: "metadata", completed: 1, total: 2 });
-
-  const corpus = buildFolderCorpusIndex(documents, options, exportPaths, chunkCount);
-  await writer.addStoredEntry("corpus.json", JSON.stringify(corpus, null, 2));
-  onProgress?.({ phase: "metadata", completed: 2, total: 2 });
-
-  return { exportPaths, chunkCount };
+  await streamExportDocuments(
+    documents,
+    options,
+    {
+      writeDocumentFile: (path, content) => writer.addStoredEntry(path, content),
+      openChunkStream: async (path) => {
+        chunksWriter = await writer.openStreamingEntry(path);
+        return (line) => chunksWriter!.writeText(line);
+      },
+      closeChunkStream: async () => {
+        if (chunksWriter) await chunksWriter.close();
+      },
+      writeMetadataFile: (path, content) => writer.addStoredEntry(path, content),
+    },
+    onProgress
+  );
 }
 
 /** Stream a ZIP to disk — scales to very large libraries (Chrome / Edge). */

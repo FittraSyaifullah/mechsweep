@@ -37,6 +37,7 @@ import {
 import type { AnalyzeResult, MechDocument, SweepResult } from "@/types";
 import type { UploadedFile } from "@/components/UploadZone";
 import type { FolderImportDocument } from "@/lib/import-folder";
+import { yieldToMain } from "@/lib/scheduling";
 
 const ANALYZE_CLIENT_CHARS = 4000;
 
@@ -644,11 +645,18 @@ export function useDocumentLibrary(options: UseDocumentLibraryOptions = {}) {
         return;
       }
 
-      setDocuments((prev) => {
-        const next = [...newDocs, ...prev];
-        void flushDocuments(next);
-        return next;
-      });
+      const IMPORT_UI_BATCH = 100;
+      let merged = documents;
+      for (let index = newDocs.length; index > 0; index -= IMPORT_UI_BATCH) {
+        const start = Math.max(0, index - IMPORT_UI_BATCH);
+        const batch = newDocs.slice(start, index);
+        merged = [...batch, ...merged];
+        setDocuments(merged);
+        if (start > 0) {
+          await yieldToMain();
+        }
+      }
+      void flushDocuments(merged);
 
       toast(
         skipped.length > 0

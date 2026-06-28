@@ -1,4 +1,9 @@
 import { isDocType } from "@/lib/file-types";
+import {
+  createThrottledProgress,
+  flushThrottledProgress,
+  yieldToMain,
+} from "@/lib/scheduling";
 import type { DocSource, DocType } from "@/types";
 
 export interface FolderImportProgress {
@@ -289,8 +294,9 @@ async function collectFromDirectoryHandle(
 
   const documents: FolderImportDocument[] = [];
   let skippedFiles = 0;
+  const report = createThrottledProgress(onProgress);
 
-  onProgress?.({ phase: "reading", completed: 0, total: jobs.length });
+  report({ phase: "reading", completed: 0, total: jobs.length });
 
   for (let index = 0; index < jobs.length; index++) {
     const job = jobs[index]!;
@@ -326,8 +332,14 @@ async function collectFromDirectoryHandle(
       documents.push(parsed);
     }
 
-    onProgress?.({ phase: "reading", completed: index + 1, total: jobs.length });
+    report({ phase: "reading", completed: index + 1, total: jobs.length });
+
+    if (index % 4 === 3) {
+      await yieldToMain();
+    }
   }
+
+  flushThrottledProgress(report, { phase: "reading", completed: jobs.length, total: jobs.length });
 
   return { folderName, documents, skippedFiles };
 }
@@ -403,8 +415,9 @@ async function collectFromFileMap(
 
   const documents: FolderImportDocument[] = [];
   let skippedFiles = 0;
+  const report = createThrottledProgress(onProgress);
 
-  onProgress?.({ phase: "reading", completed: 0, total: jobs.length });
+  report({ phase: "reading", completed: 0, total: jobs.length });
 
   for (let index = 0; index < jobs.length; index++) {
     const job = jobs[index]!;
@@ -441,8 +454,14 @@ async function collectFromFileMap(
       documents.push(parsed);
     }
 
-    onProgress?.({ phase: "reading", completed: index + 1, total: jobs.length });
+    report({ phase: "reading", completed: index + 1, total: jobs.length });
+
+    if (index % 4 === 3) {
+      await yieldToMain();
+    }
   }
+
+  flushThrottledProgress(report, { phase: "reading", completed: jobs.length, total: jobs.length });
 
   return { folderName, documents, skippedFiles };
 }
@@ -478,6 +497,14 @@ export async function importDocumentsFromFileList(
     fileMap.set(relativePath, await file.text());
   }
 
+  return collectFromFileMap(fileMap, onProgress);
+}
+
+/** Read a prepared export file map — used by stress tests and tooling. */
+export async function importDocumentsFromFileMap(
+  fileMap: Map<string, string>,
+  onProgress?: (progress: FolderImportProgress) => void
+): Promise<FolderImportResult> {
   return collectFromFileMap(fileMap, onProgress);
 }
 

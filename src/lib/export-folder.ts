@@ -1,11 +1,4 @@
-import { hydrateDocumentForExport } from "@/lib/export-hydrate";
-import {
-  buildDocumentExportPath,
-  buildExportChunksForDocument,
-  buildExportManifest,
-  buildFolderCorpusIndex,
-  exportToTxt,
-} from "@/lib/exporter";
+import { streamExportDocuments, type StreamExportProgress } from "@/lib/export-stream";
 import type { ExportOptions, MechDocument } from "@/types";
 
 export interface FolderExportResult {
@@ -14,11 +7,7 @@ export interface FolderExportResult {
   documentCount: number;
 }
 
-export interface FolderExportProgress {
-  phase: "preparing" | "documents" | "metadata";
-  completed: number;
-  total: number;
-}
+export type FolderExportProgress = StreamExportProgress;
 
 type DirectoryPickerWindow = Window & {
   showDirectoryPicker?: (options?: {
@@ -103,49 +92,34 @@ export async function exportDocumentsToFolder(
     throw new Error("No documents to export.");
   }
 
-  onProgress?.({ phase: "preparing", completed: 0, total: documents.length });
-
   const parentDir = await picker({ mode: "readwrite" });
   const folderName = exportFolderName(documents.length);
   const exportDir = await parentDir.getDirectoryHandle(folderName, { create: true });
 
-  const exportPaths: string[] = [];
-  let chunkCount = 0;
-  const chunksPath = `${options.preset}-chunks.jsonl`;
-  const chunksWritable = await openWritableFile(exportDir, chunksPath);
+  let chunksWritable: FileSystemWritableFileStream | null = null;
 
-  for (let index = 0; index < documents.length; index++) {
-    const hydrated = await hydrateDocumentForExport(documents[index]);
-    const exportPath = buildDocumentExportPath(index, documents.length, hydrated.title);
-    exportPaths.push(exportPath);
-
-    await writeTextFile(exportDir, exportPath, exportToTxt([hydrated], options));
-
-    for (const chunk of buildExportChunksForDocument(hydrated, options)) {
-      await chunksWritable.write(`${JSON.stringify(chunk)}\n`);
-      chunkCount += 1;
-    }
-
-    onProgress?.({ phase: "documents", completed: index + 1, total: documents.length });
-  }
-
-  await chunksWritable.close();
-
-  onProgress?.({ phase: "metadata", completed: 0, total: 2 });
-
-  const manifest = buildExportManifest(documents, options, chunkCount);
-  await writeTextFile(exportDir, "manifest.json", JSON.stringify(manifest, null, 2));
-  onProgress?.({ phase: "metadata", completed: 1, total: 2 });
-
-  const corpus = buildFolderCorpusIndex(documents, options, exportPaths, chunkCount);
-  await writeTextFile(exportDir, "corpus.json", JSON.stringify(corpus, null, 2));
-  onProgress?.({ phase: "metadata", completed: 2, total: 2 });
-
-  const fileCount = documents.length + 3;
+  await streamExportDocuments(
+    documents,
+    options,
+    {
+      writeDocumentFile: (path, content) => writeTextFile(exportDir, path, content),
+      openChunkStream: async (path) => {
+        chunksWritable = await openWritableFile(exportDir, path);
+        return async (line) => {
+          await chunksWritable!.write(line);
+        };
+      },
+      closeChunkStream: async () => {
+        if (chunksWritable) await chunksWritable.close();
+      },
+      writeMetadataFile: (path, content) => writeTextFile(exportDir, path, content),
+    },
+    onProgress
+  );
 
   return {
     folderName,
-    fileCount,
+    fileCount: documents.length + 3,
     documentCount: documents.length,
   };
 }
