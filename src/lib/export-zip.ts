@@ -1,4 +1,3 @@
-import { hydrateDocumentForExport } from "@/lib/export-hydrate";
 import { streamExportDocuments, type StreamExportProgress } from "@/lib/export-stream";
 import { MemoryZipTarget, ZipStreamWriter } from "@/lib/zip-writer";
 import type { ExportOptions, MechDocument } from "@/types";
@@ -18,7 +17,7 @@ type SavePickerWindow = Window & {
   }) => Promise<FileSystemFileHandle>;
 };
 
-function zipFilename(docCount: number): string {
+export function zipFilenameForExport(docCount: number): string {
   const date = new Date().toISOString().slice(0, 10);
   return `mechsweep-${date}-${docCount}-docs.zip`;
 }
@@ -29,6 +28,23 @@ export function isStreamingZipSupported(): boolean {
     window.isSecureContext &&
     typeof (window as SavePickerWindow).showSaveFilePicker === "function"
   );
+}
+
+/** Open the save dialog — call synchronously from a click handler before setState. */
+export async function pickZipSaveLocation(docCount: number): Promise<FileSystemFileHandle> {
+  if (!isStreamingZipSupported()) {
+    throw new Error("Streaming ZIP export requires Chrome or Edge on HTTPS.");
+  }
+
+  const picker = (window as SavePickerWindow).showSaveFilePicker;
+  if (!picker) {
+    throw new Error("Streaming ZIP export is unavailable in this browser.");
+  }
+
+  return picker({
+    suggestedName: zipFilenameForExport(docCount),
+    types: [{ description: "ZIP archive", accept: { "application/zip": [".zip"] } }],
+  });
 }
 
 async function writeArchiveToZip(
@@ -57,29 +73,16 @@ async function writeArchiveToZip(
   );
 }
 
-/** Stream a ZIP to disk — scales to very large libraries (Chrome / Edge). */
-export async function exportDocumentsToZip(
+/** Write a ZIP to an already-chosen save file handle. */
+export async function exportDocumentsToZipFile(
+  handle: FileSystemFileHandle,
   documents: MechDocument[],
   options: ExportOptions,
   onProgress?: (progress: ZipExportProgress) => void
 ): Promise<ZipExportResult> {
-  if (!isStreamingZipSupported()) {
-    throw new Error("Streaming ZIP export requires Chrome or Edge on HTTPS.");
-  }
-
-  const picker = (window as SavePickerWindow).showSaveFilePicker;
-  if (!picker) {
-    throw new Error("Streaming ZIP export is unavailable in this browser.");
-  }
-
   if (documents.length === 0) {
     throw new Error("No documents to export.");
   }
-
-  const handle = await picker({
-    suggestedName: zipFilename(documents.length),
-    types: [{ description: "ZIP archive", accept: { "application/zip": [".zip"] } }],
-  });
 
   const writable = await handle.createWritable();
   const writer = new ZipStreamWriter({
@@ -108,6 +111,16 @@ export async function exportDocumentsToZip(
     fileCount: documents.length + 3,
     documentCount: documents.length,
   };
+}
+
+/** Pick save location and stream a ZIP to disk. */
+export async function exportDocumentsToZip(
+  documents: MechDocument[],
+  options: ExportOptions,
+  onProgress?: (progress: ZipExportProgress) => void
+): Promise<ZipExportResult> {
+  const handle = await pickZipSaveLocation(documents.length);
+  return exportDocumentsToZipFile(handle, documents, options, onProgress);
 }
 
 /** Build a ZIP in memory one document at a time — for small libraries without save picker. */

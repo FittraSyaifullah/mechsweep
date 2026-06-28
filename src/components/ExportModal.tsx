@@ -1,19 +1,21 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { ExportOptions, MechDocument } from "@/types";
 import { MEMORY_ZIP_MAX_DOCUMENTS } from "@/lib/constants";
 import { SYNC_EXPORT_MAX_DOCUMENTS } from "@/lib/scheduling";
 import { useToast } from "@/components/Toast";
 import {
-  exportDocumentsToFolder,
+  exportDocumentsToFolderAt,
   isFolderExportSupported,
+  pickExportFolder,
   type FolderExportProgress,
 } from "@/lib/export-folder";
 import {
-  exportDocumentsToZip,
   exportDocumentsToZipBuffer,
+  exportDocumentsToZipFile,
   isStreamingZipSupported,
+  pickZipSaveLocation,
   type ZipExportProgress,
 } from "@/lib/export-zip";
 import {
@@ -64,7 +66,7 @@ export default function ExportModal({
 }: ExportModalProps) {
   const { toast } = useToast();
   const [options, setOptions] = useState<ExportOptions>({
-    format: "json",
+    format: "zip",
     preset: "plain",
     chunkSize: 1000,
     chunkOverlap: 150,
@@ -79,6 +81,10 @@ export default function ExportModal({
   const streamingZipSupported = isStreamingZipSupported();
 
   const readyDocs = documents.filter((d) => d.status === "ready");
+  const usesZipDownload = useMemo(
+    () => options.format === "zip" || readyDocs.length > SYNC_EXPORT_MAX_DOCUMENTS,
+    [options.format, readyDocs.length]
+  );
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
@@ -125,18 +131,27 @@ export default function ExportModal({
       },
     };
 
-    return { filenameBase, selected: exporters[options.format as Exclude<ExportOptions["format"], "zip">] };
+    return {
+      filenameBase,
+      selected: exporters[options.format as Exclude<ExportOptions["format"], "zip">],
+    };
   }
 
   async function handleZipDownload() {
     if (readyDocs.length === 0 || exporting) return;
 
-    setExporting(true);
-    setExportProgress({ phase: "preparing", completed: 0, total: readyDocs.length });
-
     try {
       if (streamingZipSupported) {
-        const result = await exportDocumentsToZip(readyDocs, options, setExportProgress);
+        const handle = await pickZipSaveLocation(readyDocs.length);
+        setExporting(true);
+        setExportProgress({ phase: "preparing", completed: 0, total: readyDocs.length });
+
+        const result = await exportDocumentsToZipFile(
+          handle,
+          readyDocs,
+          options,
+          setExportProgress
+        );
         onExported?.({
           mode: "download",
           documentIds: readyDocs.map((doc) => doc.id),
@@ -157,6 +172,9 @@ export default function ExportModal({
         );
         return;
       }
+
+      setExporting(true);
+      setExportProgress({ phase: "preparing", completed: 0, total: readyDocs.length });
 
       const timestamp = new Date().toISOString().slice(0, 10);
       const filename = `mechsweep-${timestamp}-${readyDocs.length}-docs.zip`;
@@ -179,18 +197,10 @@ export default function ExportModal({
   }
 
   async function handleDownload() {
-    if (readyDocs.length === 0) return;
+    if (readyDocs.length === 0 || exporting) return;
 
-    if (options.format === "zip") {
+    if (usesZipDownload) {
       await handleZipDownload();
-      return;
-    }
-
-    if (readyDocs.length > SYNC_EXPORT_MAX_DOCUMENTS) {
-      toast(
-        `${readyDocs.length.toLocaleString()} documents is too large for a single ${options.format.toUpperCase()} file. Use ZIP download or Export to folder.`,
-        "error"
-      );
       return;
     }
 
@@ -206,6 +216,9 @@ export default function ExportModal({
       );
       onExported?.({ mode: "download", documentIds: readyDocs.map((doc) => doc.id) });
       onClose();
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Could not download export";
+      toast(message, "error");
     } finally {
       setExporting(false);
       setExportProgress(null);
@@ -214,27 +227,34 @@ export default function ExportModal({
 
   async function handleFolderExport() {
     if (readyDocs.length === 0 || exporting) return;
-    setExporting(true);
-    setExportProgress({ phase: "preparing", completed: 0, total: readyDocs.length });
+
     try {
-      const result = await exportDocumentsToFolder(readyDocs, options, setExportProgress);
+      const parentDir = await pickExportFolder();
+      setExporting(true);
+      setExportProgress({ phase: "preparing", completed: 0, total: readyDocs.length });
+
+      const result = await exportDocumentsToFolderAt(
+        parentDir,
+        readyDocs,
+        options,
+        setExportProgress
+      );
       onExported?.({
         mode: "folder",
         documentIds: readyDocs.map((doc) => doc.id),
         fileCount: result.fileCount,
       });
+      toast(`Exported ${result.documentCount.toLocaleString()} documents to ${result.folderName}`, "success");
       onClose();
     } catch (err) {
       if (err instanceof DOMException && err.name === "AbortError") return;
-      const message =
-        err instanceof Error ? err.message : "Could not export to folder";
+      const message = err instanceof Error ? err.message : "Could not export to folder";
       toast(message, "error");
     } finally {
       setExporting(false);
       setExportProgress(null);
     }
   }
-
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
@@ -366,30 +386,25 @@ export default function ExportModal({
             </label>
           ))}
 
-          {options.format === "zip" ? (
-            <p className="rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-600">
-              {streamingZipSupported ? (
-                <>
-                  ZIP streams one document at a time. Progress updates while exporting — the page
-                  stays responsive for {readyDocs.length.toLocaleString()} documents.
-                </>
-              ) : (
-                <>
-                  Large ZIP exports need Chrome or Edge. Up to{" "}
-                  {MEMORY_ZIP_MAX_DOCUMENTS.toLocaleString()} documents can download in other
-                  browsers, or use Export to folder.
-                </>
-              )}
-            </p>
-          ) : folderExportSupported ? (
-            <p className="rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-600">
-              For {readyDocs.length.toLocaleString()} documents, use{" "}
-              <span className="font-medium">Export to folder</span> or{" "}
-              <span className="font-medium">Download ZIP</span>. Single-file{" "}
-              {options.format.toUpperCase()} export is limited to{" "}
-              {SYNC_EXPORT_MAX_DOCUMENTS.toLocaleString()} documents.
-            </p>
-          ) : null}
+          <p className="rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-600">
+            {usesZipDownload ? (
+              <>
+                <span className="font-medium">Download</span> saves a streaming ZIP
+                {readyDocs.length > SYNC_EXPORT_MAX_DOCUMENTS
+                  ? ` for your ${readyDocs.length.toLocaleString()} documents`
+                  : ""}
+                . Choose where to save, then watch progress below.
+              </>
+            ) : folderExportSupported ? (
+              <>
+                Single-file {options.format.toUpperCase()} works up to{" "}
+                {SYNC_EXPORT_MAX_DOCUMENTS.toLocaleString()} documents. For larger libraries use
+                ZIP or Export to folder.
+              </>
+            ) : (
+              <>Use Download ZIP in Chrome or Edge for full library exports.</>
+            )}
+          </p>
         </div>
 
         {exporting && (
@@ -430,7 +445,7 @@ export default function ExportModal({
             onClick={() => void handleDownload()}
             disabled={readyDocs.length === 0 || exporting}
           >
-            {exporting ? "Exporting…" : options.format === "zip" ? "Download ZIP" : "Download"}
+            {exporting ? "Exporting…" : usesZipDownload ? "Download ZIP" : "Download"}
           </Button>
         </div>
       </div>

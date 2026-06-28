@@ -3,6 +3,7 @@ import type { ExportOptions, MechDocument } from "@/types";
 import {
   exportDocumentsToZip,
   exportDocumentsToZipBuffer,
+  exportDocumentsToZipFile,
   isStreamingZipSupported,
 } from "@/lib/export-zip";
 import { MemoryZipTarget, ZipStreamWriter } from "@/lib/zip-writer";
@@ -83,6 +84,24 @@ describe("export-zip", () => {
     const result = await exportDocumentsToZip(docs, options);
     expect(result.documentCount).toBe(2);
     expect(result.fileCount).toBe(5);
+    expect(written.length).toBeGreaterThan(0);
+  });
+
+  it("writes zip to a pre-selected save handle", async () => {
+    const written: Uint8Array[] = [];
+    const mockHandle = {
+      name: "picked-export.zip",
+      createWritable: async () => ({
+        write: async (part: Uint8Array) => {
+          written.push(part);
+        },
+        close: async () => {},
+        abort: async () => {},
+      }),
+    } as unknown as FileSystemFileHandle;
+
+    const result = await exportDocumentsToZipFile(mockHandle, docs, options);
+    expect(result.filename).toBe("picked-export.zip");
     expect(written.length).toBeGreaterThan(0);
   });
 });

@@ -28,6 +28,19 @@ export function isFolderExportSupported(): boolean {
   );
 }
 
+export async function pickExportFolder(): Promise<FileSystemDirectoryHandle> {
+  if (!isFolderExportSupported()) {
+    throw new Error("Folder export requires Chrome or Edge on HTTPS.");
+  }
+
+  const picker = (window as DirectoryPickerWindow).showDirectoryPicker;
+  if (!picker) {
+    throw new Error("Folder export is unavailable in this browser.");
+  }
+
+  return picker({ mode: "readwrite" });
+}
+
 async function getNestedDirectoryHandle(
   root: FileSystemDirectoryHandle,
   relativePath: string,
@@ -73,26 +86,17 @@ async function writeTextFile(
   await writable.close();
 }
 
-/** Pick a folder and stream export files — scales to large libraries without loading all content at once. */
-export async function exportDocumentsToFolder(
+/** Stream export files into a chosen parent folder. */
+export async function exportDocumentsToFolderAt(
+  parentDir: FileSystemDirectoryHandle,
   documents: MechDocument[],
   options: ExportOptions,
   onProgress?: (progress: FolderExportProgress) => void
 ): Promise<FolderExportResult> {
-  if (!isFolderExportSupported()) {
-    throw new Error("Folder export requires Chrome or Edge on HTTPS.");
-  }
-
-  const picker = (window as DirectoryPickerWindow).showDirectoryPicker;
-  if (!picker) {
-    throw new Error("Folder export is unavailable in this browser.");
-  }
-
   if (documents.length === 0) {
     throw new Error("No documents to export.");
   }
 
-  const parentDir = await picker({ mode: "readwrite" });
   const folderName = exportFolderName(documents.length);
   const exportDir = await parentDir.getDirectoryHandle(folderName, { create: true });
 
@@ -122,4 +126,14 @@ export async function exportDocumentsToFolder(
     fileCount: documents.length + 3,
     documentCount: documents.length,
   };
+}
+
+/** Pick a folder and stream export files — scales to large libraries without loading all content at once. */
+export async function exportDocumentsToFolder(
+  documents: MechDocument[],
+  options: ExportOptions,
+  onProgress?: (progress: FolderExportProgress) => void
+): Promise<FolderExportResult> {
+  const parentDir = await pickExportFolder();
+  return exportDocumentsToFolderAt(parentDir, documents, options, onProgress);
 }
