@@ -4,7 +4,9 @@ import { useMemo, useState } from "react";
 import {
   buildCategoryBreakdown,
   countAnalyzedDocuments,
+  sortCategorySlices,
   type CategorySlice,
+  type CategorySortMode,
 } from "@/lib/category-stats";
 import { buildPieAngles, CATEGORY_COLORS, describePieSlice } from "@/lib/pie-chart";
 import type { MeCategory, MechDocument } from "@/types";
@@ -27,8 +29,12 @@ export default function CategoryPieChart({
   selectedCategory = null,
 }: CategoryPieChartProps) {
   const [hovered, setHovered] = useState<MeCategory | null>(null);
+  const [sortMode, setSortMode] = useState<CategorySortMode>("count-desc");
   const analyzedCount = countAnalyzedDocuments(documents);
-  const slices = useMemo(() => buildCategoryBreakdown(documents), [documents]);
+  const slices = useMemo(
+    () => sortCategorySlices(buildCategoryBreakdown(documents), sortMode),
+    [documents, sortMode]
+  );
   const angles = useMemo(() => buildPieAngles(slices), [slices]);
   const activeCategory = hovered ?? selectedCategory;
   const activeSlice = slices.find((slice) => slice.category === activeCategory) ?? null;
@@ -108,6 +114,23 @@ export default function CategoryPieChart({
       </div>
 
       <div className="min-w-0 space-y-4">
+        <div className="flex items-center justify-between gap-2">
+          <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Domains</p>
+          <label className="flex items-center gap-1.5 text-xs text-slate-500">
+            Sort
+            <select
+              value={sortMode}
+              onChange={(e) => setSortMode(e.target.value as CategorySortMode)}
+              className="select-base py-1 text-xs"
+              aria-label="Sort domains"
+            >
+              <option value="count-desc">Count ↓</option>
+              <option value="count-asc">Count ↑</option>
+              <option value="name-asc">Name A–Z</option>
+              <option value="name-desc">Name Z–A</option>
+            </select>
+          </label>
+        </div>
         <ul className="space-y-2">
           {slices.map((slice) => (
             <LegendRow

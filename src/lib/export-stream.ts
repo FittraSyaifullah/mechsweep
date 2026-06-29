@@ -13,6 +13,7 @@ export interface StreamExportProgress {
   phase: "preparing" | "documents" | "metadata";
   completed: number;
   total: number;
+  skipped?: number;
 }
 
 export interface StreamExportWriteHandlers {
@@ -36,15 +37,24 @@ export async function streamExportDocuments(
   const report = createThrottledProgress(onProgress);
   const exportPaths: string[] = [];
   let chunkCount = 0;
+  let skipped = 0;
 
-  report({ phase: "preparing", completed: 0, total: documents.length });
+  report({ phase: "preparing", completed: 0, total: documents.length, skipped: 0 });
   await yieldToMain();
 
   const chunksPath = `${options.preset}-chunks.jsonl`;
   const writeChunkLine = await handlers.openChunkStream(chunksPath);
 
   for (let index = 0; index < documents.length; index++) {
-    const hydrated = await hydrateDocumentForExport(documents[index]!);
+    const source = documents[index]!;
+    let hydrated: MechDocument;
+    try {
+      hydrated = await hydrateDocumentForExport(source);
+    } catch {
+      skipped += 1;
+      hydrated = { ...source, content: source.content || "", blobStored: undefined };
+    }
+
     const exportPath = buildDocumentExportPath(index, documents.length, hydrated.title);
     exportPaths.push(exportPath);
 
@@ -55,17 +65,21 @@ export async function streamExportDocuments(
       chunkCount += 1;
     }
 
-    report({ phase: "documents", completed: index + 1, total: documents.length });
+    report({
+      phase: "documents",
+      completed: index + 1,
+      total: documents.length,
+      skipped,
+    });
 
-    if (index % 4 === 3) {
-      await yieldToMain();
-    }
+    await yieldToMain();
   }
 
   flushThrottledProgress(report, {
     phase: "documents",
     completed: documents.length,
     total: documents.length,
+    skipped,
   });
 
   await handlers.closeChunkStream();

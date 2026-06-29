@@ -1,4 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
+import { MAX_SERVER_EXTRACT_BYTES } from "@/lib/constants";
+import { formatMegabytes } from "@/lib/fetch-errors";
 import { parsePdfWithPages } from "@/lib/pdf";
 import {
   detectLanguage,
@@ -14,6 +16,15 @@ export async function POST(request: NextRequest) {
 
     if (!file || !(file instanceof Blob)) {
       return NextResponse.json({ error: "No file provided" }, { status: 400 });
+    }
+
+    if (file.size > MAX_SERVER_EXTRACT_BYTES) {
+      return NextResponse.json(
+        {
+          error: `PDF is too large (${formatMegabytes(file.size)}). Server limit is ${formatMegabytes(MAX_SERVER_EXTRACT_BYTES)}.`,
+        },
+        { status: 413 }
+      );
     }
 
     const buffer = Buffer.from(await file.arrayBuffer());

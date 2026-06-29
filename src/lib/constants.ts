@@ -52,3 +52,12 @@ export const ANALYZE_CONCURRENCY = 4;
 
 /** In-memory ZIP fallback when showSaveFilePicker is unavailable. */
 export const MEMORY_ZIP_MAX_DOCUMENTS = 500;
+
+/** Max bytes fetched from a URL during sweep or import (server-side). */
+export const MAX_FETCH_BYTES = 50 * 1024 * 1024;
+
+/** Max upload size read entirely in the browser (text, CSV, JSON, MD). */
+export const MAX_UPLOAD_CLIENT_BYTES = 100 * 1024 * 1024;
+
+/** Max upload sent to server extract routes (Vercel body limit ~4.5 MB). */
+export const MAX_SERVER_EXTRACT_BYTES = 4 * 1024 * 1024;

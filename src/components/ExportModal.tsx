@@ -25,6 +25,7 @@ import {
   exportToPdf,
   exportToTxt,
 } from "@/lib/exporter";
+import { withExportSession } from "@/lib/export-session";
 import Button from "@/components/ui/Button";
 import ProgressBar from "@/components/ui/ProgressBar";
 import { CloseIcon, Spinner } from "@/components/ui/Icons";
@@ -55,7 +56,11 @@ function progressLabel(progress: ExportProgress): string {
   if (progress.phase === "metadata") return "Writing manifest and index…";
   const pct =
     progress.total > 0 ? Math.round((progress.completed / progress.total) * 100) : 0;
-  return `Writing documents… ${progress.completed.toLocaleString()} / ${progress.total.toLocaleString()} (${pct}%)`;
+  const skipped =
+    "skipped" in progress && progress.skipped && progress.skipped > 0
+      ? ` · ${progress.skipped} skipped`
+      : "";
+  return `Writing documents… ${progress.completed.toLocaleString()} / ${progress.total.toLocaleString()} (${pct}%)${skipped}`;
 }
 
 export default function ExportModal({
@@ -146,11 +151,8 @@ export default function ExportModal({
         setExporting(true);
         setExportProgress({ phase: "preparing", completed: 0, total: readyDocs.length });
 
-        const result = await exportDocumentsToZipFile(
-          handle,
-          readyDocs,
-          options,
-          setExportProgress
+        const result = await withExportSession(() =>
+          exportDocumentsToZipFile(handle, readyDocs, options, setExportProgress)
         );
         onExported?.({
           mode: "download",
@@ -178,7 +180,9 @@ export default function ExportModal({
 
       const timestamp = new Date().toISOString().slice(0, 10);
       const filename = `mechsweep-${timestamp}-${readyDocs.length}-docs.zip`;
-      const buffer = await exportDocumentsToZipBuffer(readyDocs, options, setExportProgress);
+      const buffer = await withExportSession(() =>
+        exportDocumentsToZipBuffer(readyDocs, options, setExportProgress)
+      );
       downloadExport(buffer, filename, "application/zip");
       onExported?.({
         mode: "download",
@@ -233,11 +237,8 @@ export default function ExportModal({
       setExporting(true);
       setExportProgress({ phase: "preparing", completed: 0, total: readyDocs.length });
 
-      const result = await exportDocumentsToFolderAt(
-        parentDir,
-        readyDocs,
-        options,
-        setExportProgress
+      const result = await withExportSession(() =>
+        exportDocumentsToFolderAt(parentDir, readyDocs, options, setExportProgress)
       );
       onExported?.({
         mode: "folder",
@@ -394,6 +395,9 @@ export default function ExportModal({
                   ? ` for your ${readyDocs.length.toLocaleString()} documents`
                   : ""}
                 . Choose where to save, then watch progress below.
+                {readyDocs.length > 500 && (
+                  <> Keep this tab open — large exports may take several minutes.</>
+                )}
               </>
             ) : folderExportSupported ? (
               <>

@@ -5,7 +5,7 @@ import { buildExaExcludeDomains, resolveEffectiveExaBatchSize } from "@/lib/exa-
 import { fetchRemoteUrl } from "@/lib/fetch-document";
 import { readJsonBody, serializeForJsonResponse } from "@/lib/json-safe";
 import { sanitizeSweepUrl } from "@/lib/sweep-payload";
-import { MAX_EXA_EXCLUDE_DOMAINS, SWEEP_MAX_EXCLUDE_URLS } from "@/lib/constants";
+import { MAX_EXA_EXCLUDE_DOMAINS, MAX_FETCH_BYTES, SWEEP_MAX_EXCLUDE_URLS } from "@/lib/constants";
 import { sanitizeSweepResults } from "@/lib/sweep-sanitize";
 import { resolveSweepRequestLimit } from "@/lib/sweep-limits";
 import {
@@ -25,7 +25,6 @@ import type { DocType, SweepResult } from "@/types";
 const VALIDATE_TIMEOUT_MS = 12000;
 const VALIDATE_CONCURRENCY = 20;
 export const maxDuration = 60;
-const MAX_FETCH_BYTES = 15 * 1024 * 1024;
 const DEFAULT_MISTRAL_SEARCH_MODEL = "mistral-small-latest";
 const DEFAULT_OPENROUTER_SEARCH_MODEL = "perplexity/sonar-pro";
 

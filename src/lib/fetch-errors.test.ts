@@ -26,7 +26,7 @@ describe("fetch error helpers", () => {
   });
 
   it("detects oversized and unsupported content", () => {
-    expect(oversizedDocumentMessage(20 * 1024 * 1024)).toContain("too large");
+    expect(oversizedDocumentMessage(60 * 1024 * 1024)).toContain("too large");
     expect(isSupportedContentType("image/png")).toBe(false);
     expect(isSupportedContentType("application/pdf")).toBe(true);
     expect(isSupportedContentType("application/octet-stream", "https://x.com/a.pdf")).toBe(true);

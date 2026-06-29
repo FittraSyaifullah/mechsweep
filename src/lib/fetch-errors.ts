@@ -1,6 +1,7 @@
+import { MAX_FETCH_BYTES } from "@/lib/constants";
 import { URL_EXTENSION_PATTERN } from "@/lib/file-types";
 
-export const MAX_FETCH_BYTES = 15 * 1024 * 1024;
+export { MAX_FETCH_BYTES };
 
 export function formatMegabytes(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;

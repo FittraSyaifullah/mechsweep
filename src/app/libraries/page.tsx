@@ -71,6 +71,7 @@ export default function LibrariesPage() {
           documents={library.documents}
           domainFilter={domainFilter}
           onClearDomainFilter={() => setDomainFilter(null)}
+          onDomainFilterChange={setDomainFilter}
           onRemove={library.requestRemoveDoc}
           onSelect={library.selectDoc}
           onRetry={library.retryDoc}

@@ -6,7 +6,7 @@ import LibraryStats from "@/components/LibraryStats";
 import EmptyState from "@/components/ui/EmptyState";
 import { GridIcon, Spinner } from "@/components/ui/Icons";
 import { MAX_LIBRARY_DOCUMENTS } from "@/lib/constants";
-import { normalizeCategory } from "@/lib/category-stats";
+import { normalizeCategory, buildDomainOptions, buildIndustryOptions, sortLabeledCounts, type FilterListSortMode } from "@/lib/category-stats";
 import { DOC_TYPES, docTypeLabel } from "@/lib/file-types";
 import type { DocSource, DocStatus, DocType, MeCategory, MechDocument } from "@/types";
 
@@ -23,12 +23,17 @@ interface DocLibraryProps {
   /** Filter library to a domain selected from the pie chart. */
   domainFilter?: MeCategory | null;
   onClearDomainFilter?: () => void;
+  onDomainFilterChange?: (domain: MeCategory | null) => void;
 }
 
-type SortOption = "newest" | "oldest" | "title" | "type";
+type SortOption = "newest" | "oldest" | "title" | "type" | "domain" | "size";
 type DateFilter = "all" | "7" | "30" | "365";
 type SearchMode = "keyword" | "semantic";
 type ExportedFilter = "all" | "exported" | "not-exported";
+
+function documentSizeBytes(doc: MechDocument): number {
+  return doc.sizeBytes ?? doc.contentLength ?? doc.content.length;
+}
 
 const PAGE_SIZE = 48;
 
@@ -58,6 +63,7 @@ export default function DocLibrary({
   onBulkRetry,
   domainFilter = null,
   onClearDomainFilter,
+  onDomainFilterChange,
 }: DocLibraryProps) {
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<DocStatus | "all">("all");
@@ -76,6 +82,7 @@ export default function DocLibrary({
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [semanticLoading, setSemanticLoading] = useState(false);
   const [showMoreFilters, setShowMoreFilters] = useState(false);
+  const [filterListSort, setFilterListSort] = useState<FilterListSortMode>("count-desc");
   const deferredSearch = useDeferredValue(search);
 
   useEffect(() => {
@@ -117,14 +124,28 @@ export default function DocLibrary({
     };
   }, [deferredSearch, searchMode]);
 
-  const categories = useMemo(
-    () =>
-      Array.from(new Set(documents.map((doc) => doc.category).filter(Boolean) as string[])).sort(),
-    [documents]
+  const industryOptions = useMemo(
+    () => sortLabeledCounts(buildIndustryOptions(documents), filterListSort),
+    [documents, filterListSort]
+  );
+  const domainOptions = useMemo(
+    () => sortLabeledCounts(buildDomainOptions(documents), filterListSort),
+    [documents, filterListSort]
   );
   const tags = useMemo(
-    () => Array.from(new Set(documents.flatMap((doc) => doc.tags ?? []))).sort(),
-    [documents]
+    () => {
+      const counts = new Map<string, number>();
+      for (const doc of documents) {
+        for (const tag of doc.tags ?? []) {
+          counts.set(tag, (counts.get(tag) ?? 0) + 1);
+        }
+      }
+      return sortLabeledCounts(
+        Array.from(counts.entries()).map(([label, count]) => ({ label, count })),
+        filterListSort
+      );
+    },
+    [documents, filterListSort]
   );
 
   const docsWithoutEmbeddings = useMemo(
@@ -143,7 +164,7 @@ export default function DocLibrary({
         if (statusFilter !== "all" && d.status !== statusFilter) return false;
         if (typeFilter !== "all" && d.type !== typeFilter) return false;
         if (sourceFilter !== "all" && d.source !== sourceFilter) return false;
-        if (categoryFilter !== "all" && normalizeCategory(d.category) !== categoryFilter) {
+        if (categoryFilter !== "all" && d.category !== categoryFilter) {
           return false;
         }
         if (domainFilter && normalizeCategory(d.category) !== domainFilter) return false;
@@ -179,6 +200,12 @@ export default function DocLibrary({
         }
         if (sortBy === "title") return a.title.localeCompare(b.title);
         if (sortBy === "type") return a.type.localeCompare(b.type);
+        if (sortBy === "domain") {
+          return normalizeCategory(a.category).localeCompare(normalizeCategory(b.category));
+        }
+        if (sortBy === "size") {
+          return documentSizeBytes(b) - documentSizeBytes(a);
+        }
         return new Date(b.addedAt).getTime() - new Date(a.addedAt).getTime();
       });
   }, [
@@ -266,7 +293,7 @@ export default function DocLibrary({
     if (categoryFilter !== "all") {
       chips.push({
         key: "category",
-        label: `Category: ${categoryFilter}`,
+        label: `Industry: ${categoryFilter}`,
         onClear: () => setCategoryFilter("all"),
       });
     }
@@ -580,6 +607,8 @@ export default function DocLibrary({
               <option value="oldest">Oldest</option>
               <option value="title">Title</option>
               <option value="type">Type</option>
+              <option value="domain">Domain</option>
+              <option value="size">Size</option>
             </select>
           </div>
         </div>
@@ -631,8 +660,46 @@ export default function DocLibrary({
             </select>
           </div>
           <div>
+            <label htmlFor="library-filter-sort" className="filter-label">
+              List order
+            </label>
+            <select
+              id="library-filter-sort"
+              value={filterListSort}
+              onChange={(e) => setFilterListSort(e.target.value as FilterListSortMode)}
+              className="select-base"
+            >
+              <option value="count-desc">Count ↓</option>
+              <option value="count-asc">Count ↑</option>
+              <option value="name-asc">Name A–Z</option>
+              <option value="name-desc">Name Z–A</option>
+            </select>
+          </div>
+          <div>
+            <label htmlFor="library-domain" className="filter-label">
+              Domain
+            </label>
+            <select
+              id="library-domain"
+              value={domainFilter ?? "all"}
+              onChange={(e) => {
+                const value = e.target.value;
+                if (value === "all") onDomainFilterChange?.(null);
+                else onDomainFilterChange?.(value as MeCategory);
+              }}
+              className="select-base"
+            >
+              <option value="all">All domains</option>
+              {domainOptions.map((option) => (
+                <option key={option.label} value={option.label}>
+                  {option.label} ({option.count})
+                </option>
+              ))}
+            </select>
+          </div>
+          <div>
             <label htmlFor="library-category" className="filter-label">
-              Category
+              Industry
             </label>
             <select
               id="library-category"
@@ -640,10 +707,10 @@ export default function DocLibrary({
               onChange={(e) => setCategoryFilter(e.target.value)}
               className="select-base"
             >
-              <option value="all">All categories</option>
-              {categories.map((category) => (
-                <option key={category} value={category}>
-                  {category}
+              <option value="all">All industries</option>
+              {industryOptions.map((option) => (
+                <option key={option.label} value={option.label}>
+                  {option.label} ({option.count})
                 </option>
               ))}
             </select>
@@ -691,8 +758,8 @@ export default function DocLibrary({
             >
               <option value="all">All tags</option>
               {tags.map((tag) => (
-                <option key={tag} value={tag}>
-                  {tag}
+                <option key={tag.label} value={tag.label}>
+                  {tag.label} ({tag.count})
                 </option>
               ))}
             </select>

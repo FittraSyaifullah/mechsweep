@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { extractDocumentText } from "@/lib/document-extract";
+import { MAX_SERVER_EXTRACT_BYTES } from "@/lib/constants";
+import { formatMegabytes } from "@/lib/fetch-errors";
 import { detectDocType } from "@/lib/parser";
 import type { DocType } from "@/types";
 
@@ -12,6 +14,15 @@ export async function POST(request: NextRequest) {
 
     if (!(file instanceof File)) {
       return NextResponse.json({ error: "file is required" }, { status: 400 });
+    }
+
+    if (file.size > MAX_SERVER_EXTRACT_BYTES) {
+      return NextResponse.json(
+        {
+          error: `File is too large (${formatMegabytes(file.size)}). Server extract limit is ${formatMegabytes(MAX_SERVER_EXTRACT_BYTES)}.`,
+        },
+        { status: 413 }
+      );
     }
 
     const requestedType = formData.get("type");

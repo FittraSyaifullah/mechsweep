@@ -17,7 +17,12 @@ import {
   SUPPORTED_TYPE_LABELS,
   UPLOAD_ACCEPT,
 } from "@/lib/file-types";
-import { MAX_LIBRARY_DOCUMENTS } from "@/lib/constants";
+import {
+  MAX_LIBRARY_DOCUMENTS,
+  MAX_SERVER_EXTRACT_BYTES,
+  MAX_UPLOAD_CLIENT_BYTES,
+} from "@/lib/constants";
+import { formatMegabytes } from "@/lib/fetch-errors";
 import type { DocType, DocumentPage, ExtractedTable, MechDocument } from "@/types";
 import Alert from "@/components/ui/Alert";
 import { Spinner, UploadIcon } from "@/components/ui/Icons";
@@ -41,6 +46,18 @@ interface UploadZoneProps {
 }
 
 const SERVER_EXTRACT_TYPES = new Set<DocType>(["pdf", "zip", "stl", "step", "dwg"]);
+
+function clientUploadLimitMessage(bytes: number): string {
+  return `File is too large (${formatMegabytes(bytes)}). Local uploads are limited to ${formatMegabytes(
+    MAX_UPLOAD_CLIENT_BYTES
+  )}.`;
+}
+
+function serverExtractLimitMessage(bytes: number): string {
+  return `File is too large (${formatMegabytes(bytes)}) for server extraction (max ${formatMegabytes(
+    MAX_SERVER_EXTRACT_BYTES
+  )}). Convert to TXT/MD/CSV or split the file.`;
+}
 
 async function extractViaApi(file: File, type: DocType, endpoint: string): Promise<UploadedFile> {
   const formData = new FormData();
@@ -94,12 +111,25 @@ export default function UploadZone({ onUpload }: UploadZoneProps) {
         }
 
         try {
+          if (file.size > MAX_UPLOAD_CLIENT_BYTES) {
+            setError(clientUploadLimitMessage(file.size));
+            continue;
+          }
+
           if (type === "pdf") {
+            if (file.size > MAX_SERVER_EXTRACT_BYTES) {
+              setError(serverExtractLimitMessage(file.size));
+              continue;
+            }
             uploaded.push(await extractViaApi(file, type, "/api/parse-pdf"));
             continue;
           }
 
           if (SERVER_EXTRACT_TYPES.has(type)) {
+            if (file.size > MAX_SERVER_EXTRACT_BYTES) {
+              setError(serverExtractLimitMessage(file.size));
+              continue;
+            }
             uploaded.push(await extractViaApi(file, type, "/api/extract-file"));
             continue;
           }
@@ -166,7 +196,7 @@ export default function UploadZone({ onUpload }: UploadZoneProps) {
   return (
     <div className="space-y-3">
       <p className="text-sm text-slate-600">
-        Upload {SUPPORTED_TYPE_LABELS} files. Up to {MAX_LIBRARY_DOCUMENTS.toLocaleString()} documents stored locally in this browser.
+        Upload {SUPPORTED_TYPE_LABELS} files. Text files up to {formatMegabytes(MAX_UPLOAD_CLIENT_BYTES)}; PDF/CAD/ZIP up to {formatMegabytes(MAX_SERVER_EXTRACT_BYTES)} via server extract. Up to {MAX_LIBRARY_DOCUMENTS.toLocaleString()} documents stored locally.
       </p>
 
       <div
