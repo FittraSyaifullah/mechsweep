@@ -24,6 +24,20 @@ export interface CloudSyncProgress {
   phase: "index" | "upload" | "download" | "delete" | "merge";
   completed: number;
   total: number;
+  skipped?: number;
+}
+
+export function isSupabaseSchemaMissingError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return (
+    message.includes("library_documents") ||
+    message.includes("PGRST205") ||
+    message.includes("schema cache")
+  );
+}
+
+export function supabaseSchemaSetupMessage(): string {
+  return "Cloud schema is not set up. Run supabase/migrations/001_library.sql in the Supabase SQL Editor, or run: node scripts/apply-supabase-migration.mjs";
 }
 
 interface CloudDocumentPayload {
@@ -93,6 +107,35 @@ function parseCloudPayload(raw: string): MechDocument | null {
   }
 }
 
+async function fetchCloudIndexMap(
+  supabase: SupabaseClient,
+  userId: string
+): Promise<Map<string, string | null>> {
+  const map = new Map<string, string | null>();
+  const pageSize = 1000;
+  let from = 0;
+
+  while (true) {
+    const { data, error } = await supabase
+      .from("library_documents")
+      .select("document_id, content_hash")
+      .eq("user_id", userId)
+      .range(from, from + pageSize - 1);
+
+    if (error) throw new Error(error.message);
+
+    const rows = data ?? [];
+    for (const row of rows) {
+      map.set(row.document_id as string, (row.content_hash as string | null) ?? null);
+    }
+
+    if (rows.length < pageSize) break;
+    from += pageSize;
+  }
+
+  return map;
+}
+
 async function deleteStaleCloudDocuments(
   supabase: SupabaseClient,
   userId: string,
@@ -143,22 +186,16 @@ export async function uploadLibraryToSupabase(
   userId: string,
   docs: MechDocument[],
   onProgress?: (progress: CloudSyncProgress) => void
-): Promise<void> {
+): Promise<{ uploaded: number; skipped: number }> {
   const localIds = new Set(docs.map((doc) => doc.id));
+  const remoteIndex = await fetchCloudIndexMap(supabase, userId);
 
-  const { data: remoteRows, error: listError } = await supabase
-    .from("library_documents")
-    .select("document_id")
-    .eq("user_id", userId);
-
-  if (listError) throw new Error(listError.message);
-
-  const remoteIds = (remoteRows ?? []).map((row) => row.document_id as string);
-  const staleIds = remoteIds.filter((id) => !localIds.has(id));
+  const staleIds = Array.from(remoteIndex.keys()).filter((id) => !localIds.has(id));
   await deleteStaleCloudDocuments(supabase, userId, staleIds, onProgress);
 
   let uploaded = 0;
-  onProgress?.({ phase: "upload", completed: 0, total: docs.length });
+  let skipped = 0;
+  onProgress?.({ phase: "upload", completed: 0, total: docs.length, skipped: 0 });
 
   for (let offset = 0; offset < docs.length; offset += INDEX_BATCH_SIZE) {
     const batch = docs.slice(offset, offset + INDEX_BATCH_SIZE);
@@ -174,9 +211,23 @@ export async function uploadLibraryToSupabase(
       phase: "index",
       completed: Math.min(offset + batch.length, docs.length),
       total: docs.length,
+      skipped,
     });
 
     await runWithConcurrency(hydrated, UPLOAD_CONCURRENCY, async (doc) => {
+      const remoteHash = remoteIndex.get(doc.id) ?? null;
+      const localHash = doc.contentHash ?? null;
+      if (remoteHash && localHash && remoteHash === localHash) {
+        skipped += 1;
+        onProgress?.({
+          phase: "upload",
+          completed: uploaded + skipped,
+          total: docs.length,
+          skipped,
+        });
+        return;
+      }
+
       const payload: CloudDocumentPayload = {
         version: CLOUD_SYNC_VERSION,
         document: {
@@ -195,32 +246,54 @@ export async function uploadLibraryToSupabase(
 
       if (error) throw new Error(error.message);
       uploaded += 1;
-      onProgress?.({ phase: "upload", completed: uploaded, total: docs.length });
+      onProgress?.({
+        phase: "upload",
+        completed: uploaded + skipped,
+        total: docs.length,
+        skipped,
+      });
     });
   }
+
+  return { uploaded, skipped };
 }
 
 export async function downloadLibraryFromSupabase(
   supabase: SupabaseClient,
   userId: string,
+  localDocs: MechDocument[] = [],
   onProgress?: (progress: CloudSyncProgress) => void
 ): Promise<MechDocument[]> {
-  const { data: rows, error: listError } = await supabase
-    .from("library_documents")
-    .select("document_id")
-    .eq("user_id", userId)
-    .order("updated_at", { ascending: false });
+  const remoteIndex = await fetchCloudIndexMap(supabase, userId);
+  const localById = new Map(localDocs.map((doc) => [doc.id, doc]));
 
-  if (listError) throw new Error(listError.message);
+  const unchanged = Array.from(remoteIndex.keys()).filter((documentId) => {
+    const local = localById.get(documentId);
+    if (!local) return false;
+    const remoteHash = remoteIndex.get(documentId);
+    const localHash = local.contentHash ?? null;
+    return Boolean(remoteHash && localHash && remoteHash === localHash);
+  });
 
-  const ids = (rows ?? []).map((row) => row.document_id as string);
-  if (ids.length === 0) return [];
+  const toDownload = Array.from(remoteIndex.keys()).filter(
+    (documentId) => !unchanged.includes(documentId)
+  );
+
+  if (toDownload.length === 0) {
+    return removeDuplicateDocuments(localDocs).slice(0, MAX_LIBRARY_DOCUMENTS);
+  }
 
   const documents: MechDocument[] = [];
   let completed = 0;
-  onProgress?.({ phase: "download", completed: 0, total: ids.length });
+  const skipped = unchanged.length;
+  onProgress?.({
+    phase: "download",
+    completed: skipped,
+    total: remoteIndex.size,
+    skipped,
+  });
 
-  await runWithConcurrency(ids, UPLOAD_CONCURRENCY, async (documentId) => {
+  await runWithConcurrency(toDownload, UPLOAD_CONCURRENCY, async (documentId) => {
     const { data, error } = await supabase.storage
       .from(LIBRARY_BLOBS_BUCKET)
       .download(blobPath(userId, documentId));
@@ -231,10 +304,22 @@ export async function downloadLibraryFromSupabase(
     if (doc) documents.push(doc);
 
     completed += 1;
-    onProgress?.({ phase: "download", completed, total: ids.length });
+    onProgress?.({
+      phase: "download",
+      completed: skipped + completed,
+      total: remoteIndex.size,
+      skipped,
+    });
   });
 
-  return removeDuplicateDocuments(documents).slice(0, MAX_LIBRARY_DOCUMENTS);
+  const unchangedDocs = unchanged
+    .map((id) => localById.get(id))
+    .filter((doc): doc is MechDocument => Boolean(doc));
+
+  return removeDuplicateDocuments([...unchangedDocs, ...documents]).slice(
+    0,
+    MAX_LIBRARY_DOCUMENTS
+  );
 }
 
 export async function pullAndMergeLibrary(
@@ -244,6 +329,11 @@ export async function pullAndMergeLibrary(
   onProgress?: (progress: CloudSyncProgress) => void
 ): Promise<MechDocument[]> {
   onProgress?.({ phase: "merge", completed: 0, total: 1 });
-  const remoteDocs = await downloadLibraryFromSupabase(supabase, userId, onProgress);
+  const remoteDocs = await downloadLibraryFromSupabase(
+    supabase,
+    userId,
+    localDocs,
+    onProgress
+  );
   return mergeCloudLibraries(localDocs, remoteDocs);
 }

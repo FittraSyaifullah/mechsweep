@@ -1,0 +1,5 @@
+# MechSweep Supabase project — https://supabase.com/dashboard/project/htdlgflnlmrfoqrwmtvk
+project_id = "htdlgflnlmrfoqrwmtvk"
+
+[db]
+major_version = 15

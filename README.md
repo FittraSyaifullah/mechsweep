@@ -97,7 +97,16 @@ NEXT_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
 ```
 
 4. In Supabase Auth settings, enable email/password sign-up (or disable email confirmation for personal use).
-5. Restart the dev server. Use **Sign in** in the header, then **Upload to cloud** / **Download & merge**.
+5. Run the migration once (required — creates `library_documents` table and `library-blobs` bucket):
+
+```bash
+# Option A: paste supabase/migrations/001_library.sql in SQL Editor
+# Option B: with a personal access token from supabase.com/dashboard/account/tokens
+set SUPABASE_ACCESS_TOKEN=sbp_...
+npm run supabase:migrate
+```
+
+6. Restart the dev server. Click **Cloud** in the header, sign in, then **Upload to cloud** / **Download & merge**.
 
 Cloud storage uses a Postgres index table plus a private `library-blobs` bucket (50 MB per file on the free tier migration).
 

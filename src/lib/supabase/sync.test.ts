@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { mergeCloudLibraries } from "@/lib/supabase/sync";
+import {
+  isSupabaseSchemaMissingError,
+  mergeCloudLibraries,
+} from "@/lib/supabase/sync";
 import type { MechDocument } from "@/types";
 
 function doc(partial: Partial<MechDocument> & Pick<MechDocument, "id" | "title">): MechDocument {
@@ -37,5 +40,12 @@ describe("mergeCloudLibraries", () => {
     const remote = [doc({ id: "remote", title: "Remote" })];
     const merged = mergeCloudLibraries(local, remote);
     expect(merged.length).toBeLessThanOrEqual(25_000);
+  });
+
+  it("detects missing schema errors", () => {
+    expect(
+      isSupabaseSchemaMissingError(new Error("Could not find the table 'public.library_documents'"))
+    ).toBe(true);
+    expect(isSupabaseSchemaMissingError(new Error("network failed"))).toBe(false);
   });
 });

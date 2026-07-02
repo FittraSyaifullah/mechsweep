@@ -7,10 +7,14 @@ import { useToast } from "@/components/Toast";
 import { useSupabase } from "@/contexts/SupabaseProvider";
 import {
   fetchCloudLibraryCount,
+  isSupabaseSchemaMissingError,
   pullAndMergeLibrary,
+  supabaseSchemaSetupMessage,
   uploadLibraryToSupabase,
   type CloudSyncProgress,
 } from "@/lib/supabase/sync";
+import { withExportSession } from "@/lib/export-session";
+import ProgressBar from "@/components/ui/ProgressBar";
 import type { MechDocument } from "@/types";
 
 interface CloudSyncPanelProps {
@@ -29,7 +33,9 @@ function progressLabel(progress: CloudSyncProgress | null): string {
     delete: "Cleaning cloud",
     merge: "Merging",
   };
-  return `${labels[progress.phase]}… ${pct}%`;
+  const skipped =
+    progress.skipped && progress.skipped > 0 ? ` · ${progress.skipped} unchanged` : "";
+  return `${labels[progress.phase]}… ${pct}%${skipped}`;
 }
 
 export default function CloudSyncPanel({ documents, onLibraryMerged }: CloudSyncPanelProps) {
@@ -47,6 +53,8 @@ export default function CloudSyncPanel({ documents, onLibraryMerged }: CloudSync
   const [syncError, setSyncError] = useState<string | null>(null);
   const [cloudCount, setCloudCount] = useState<number | null>(null);
   const [cloudCountLoading, setCloudCountLoading] = useState(false);
+  const [schemaMissing, setSchemaMissing] = useState(false);
+  const [offerRestore, setOfferRestore] = useState(false);
 
   useEffect(() => {
     if (!open || !client || !user) {
@@ -58,10 +66,17 @@ export default function CloudSyncPanel({ documents, onLibraryMerged }: CloudSync
     setCloudCountLoading(true);
     void fetchCloudLibraryCount(client, user.id)
       .then((count) => {
-        if (active) setCloudCount(count);
+        if (active) {
+          setCloudCount(count);
+          setSchemaMissing(false);
+          if (documents.length === 0 && count > 0) setOfferRestore(true);
+        }
       })
-      .catch(() => {
-        if (active) setCloudCount(null);
+      .catch((err) => {
+        if (active) {
+          setCloudCount(null);
+          setSchemaMissing(isSupabaseSchemaMissingError(err));
+        }
       })
       .finally(() => {
         if (active) setCloudCountLoading(false);
@@ -70,7 +85,7 @@ export default function CloudSyncPanel({ documents, onLibraryMerged }: CloudSync
     return () => {
       active = false;
     };
-  }, [open, client, user]);
+  }, [open, client, user, documents.length]);
 
   async function handleAuthSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -102,12 +117,24 @@ export default function CloudSyncPanel({ documents, onLibraryMerged }: CloudSync
     setSyncError(null);
     setProgress(null);
     try {
-      await uploadLibraryToSupabase(client, user.id, documents, setProgress);
+      const result = await withExportSession(() =>
+        uploadLibraryToSupabase(client, user.id, documents, setProgress)
+      );
       setCloudCount(documents.length);
-      toast(`Uploaded ${documents.length.toLocaleString()} documents to cloud`, "success");
+      const skippedNote =
+        result.skipped > 0 ? ` (${result.skipped.toLocaleString()} unchanged)` : "";
+      toast(
+        `Uploaded ${result.uploaded.toLocaleString()} documents to cloud${skippedNote}`,
+        "success"
+      );
       setOpen(false);
     } catch (err) {
-      setSyncError(err instanceof Error ? err.message : "Upload failed");
+      if (isSupabaseSchemaMissingError(err)) {
+        setSchemaMissing(true);
+        setSyncError(supabaseSchemaSetupMessage());
+      } else {
+        setSyncError(err instanceof Error ? err.message : "Upload failed");
+      }
     } finally {
       setSyncing(false);
       setProgress(null);
@@ -119,12 +146,20 @@ export default function CloudSyncPanel({ documents, onLibraryMerged }: CloudSync
     setSyncing(true);
     setSyncError(null);
     setProgress(null);
+    setOfferRestore(false);
     try {
-      const merged = await pullAndMergeLibrary(client, user.id, documents, setProgress);
+      const merged = await withExportSession(() =>
+        pullAndMergeLibrary(client, user.id, documents, setProgress)
+      );
       onLibraryMerged(merged);
       setOpen(false);
     } catch (err) {
-      setSyncError(err instanceof Error ? err.message : "Download failed");
+      if (isSupabaseSchemaMissingError(err)) {
+        setSchemaMissing(true);
+        setSyncError(supabaseSchemaSetupMessage());
+      } else {
+        setSyncError(err instanceof Error ? err.message : "Download failed");
+      }
     } finally {
       setSyncing(false);
       setProgress(null);
@@ -231,11 +266,39 @@ export default function CloudSyncPanel({ documents, onLibraryMerged }: CloudSync
                   </p>
                 </div>
 
+                {schemaMissing && (
+                  <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+                    {supabaseSchemaSetupMessage()}{" "}
+                    <a
+                      href="https://supabase.com/dashboard/project/htdlgflnlmrfoqrwmtvk/sql/new"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="font-semibold text-mech-700 hover:underline"
+                    >
+                      Open SQL Editor
+                    </a>
+                  </p>
+                )}
+
                 {documents.length === 0 && cloudCount != null && cloudCount > 0 && (
                   <p className="rounded-lg border border-mech-200 bg-mech-50 px-3 py-2 text-xs text-mech-800">
                     Your cloud library has {cloudCount.toLocaleString()} documents. Use Download
                     &amp; merge to restore them on this device.
                   </p>
+                )}
+
+                {offerRestore && documents.length === 0 && cloudCount != null && cloudCount > 0 && (
+                  <div className="rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-xs text-sky-900">
+                    <p>Restore {cloudCount.toLocaleString()} documents from cloud?</p>
+                    <button
+                      type="button"
+                      onClick={() => void handleDownload()}
+                      disabled={syncing}
+                      className="mt-2 font-semibold text-mech-700 hover:text-mech-900"
+                    >
+                      Restore now
+                    </button>
+                  </div>
                 )}
 
                 <p className="text-xs leading-relaxed text-slate-600">
@@ -253,10 +316,19 @@ export default function CloudSyncPanel({ documents, onLibraryMerged }: CloudSync
                 )}
 
                 {progress && (
-                  <p className="flex items-center gap-2 text-xs text-sky-700">
-                    <Spinner className="h-3.5 w-3.5" aria-hidden="true" />
-                    {progressLabel(progress)}
-                  </p>
+                  <div className="space-y-2">
+                    <p className="flex items-center gap-2 text-xs text-sky-700">
+                      <Spinner className="h-3.5 w-3.5" aria-hidden="true" />
+                      {progressLabel(progress)}
+                    </p>
+                    {progress.total > 0 && (
+                      <ProgressBar
+                        value={progress.completed}
+                        max={progress.total}
+                        label="Cloud sync"
+                      />
+                    )}
+                  </div>
                 )}
 
                 <div className="flex flex-col gap-2">
